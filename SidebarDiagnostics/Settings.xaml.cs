@@ -61,6 +61,52 @@ namespace SidebarDiagnostics
             }
         }
 
+        private void ClaudeAddAccount_Click(object sender, RoutedEventArgs e)
+        {
+            Monitoring.MonitorConfig _config = (sender as FrameworkElement)?.DataContext as Monitoring.MonitorConfig;
+
+            if (_config == null)
+            {
+                return;
+            }
+
+            Microsoft.Win32.OpenFileDialog _dialog = new Microsoft.Win32.OpenFileDialog()
+            {
+                Title = Framework.Resources.SettingsClaudeAddAccountTooltip,
+                Filter = ".credentials.json|.credentials.json|JSON|*.json",
+                CheckFileExists = true,
+                InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
+            };
+
+            if (_dialog.ShowDialog(this) != true)
+            {
+                return;
+            }
+
+            // El nombre sale de la carpeta de configuracion (.claude-trabajo -> claude-trabajo); se puede renombrar en la lista.
+            string _name = new System.IO.FileInfo(_dialog.FileName).Directory?.Name.TrimStart('.');
+
+            Monitoring.ClaudeAccount _account = Monitoring.ClaudeAccountStore.Add(_dialog.FileName, string.IsNullOrEmpty(_name) ? "Claude" : _name);
+
+            _config.HardwareOC.Add(new Monitoring.HardwareConfig() { ID = _account.ID, Name = _account.Name, ActualName = _account.Name });
+        }
+
+        private void ClaudeRemoveAccount_Click(object sender, RoutedEventArgs e)
+        {
+            Monitoring.HardwareConfig _selected = (sender as FrameworkElement)?.Tag as Monitoring.HardwareConfig;
+            Monitoring.MonitorConfig _config = (sender as FrameworkElement)?.DataContext as Monitoring.MonitorConfig;
+
+            if (_selected == null || _config == null || _selected.ID == Monitoring.ClaudeAccountStore.DEFAULTID)
+            {
+                // la cuenta por defecto sale de ~/.claude: se desactiva con su casilla, no se quita
+                return;
+            }
+
+            Monitoring.ClaudeAccountStore.Remove(_selected.ID);
+
+            _config.HardwareOC.Remove(_selected);
+        }
+
         private void ClickThroughCheckbox_Checked(object sender, RoutedEventArgs e)
         {
             ShowTrayIconCheckbox.IsChecked = true;

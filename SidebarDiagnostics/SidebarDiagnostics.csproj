@@ -196,6 +196,7 @@
       <DependentUpon>ChangeLog.xaml</DependentUpon>
     </Compile>
     <Compile Include="ChangeLogModel.cs" />
+    <Compile Include="ClaudeUsage.cs" />
     <Compile Include="Graph.xaml.cs">
       <DependentUpon>Graph.xaml</DependentUpon>
     </Compile>

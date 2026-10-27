@@ -88,6 +88,9 @@ namespace SidebarDiagnostics.Monitoring
                 case MonitorType.Network:
                     return NetworkMonitor.GetHardware().ToArray();
 
+                case MonitorType.Claude:
+                    return ClaudeMonitor.GetHardware().ToArray();
+
                 default:
                     throw new ArgumentException("Invalid MonitorType.");
             }
@@ -168,6 +171,14 @@ namespace SidebarDiagnostics.Monitoring
                         config.Params
                         );
 
+                case MonitorType.Claude:
+                    return ClaudePanel(
+                        config.Type,
+                        config.Hardware,
+                        config.Metrics,
+                        config.Params
+                        );
+
                 default:
                     throw new ArgumentException("Invalid MonitorType.");
             }
@@ -197,6 +208,15 @@ namespace SidebarDiagnostics.Monitoring
                 type.GetDescription(),
                 "M 40,44L 39.9999,51L 44,51C 45.1046,51 46,51.8954 46,53L 46,57C 46,58.1046 45.1045,59 44,59L 32,59C 30.8954,59 30,58.1046 30,57L 30,53C 30,51.8954 30.8954,51 32,51L 36,51L 36,44L 40,44 Z M 47,53L 57,53L 57,57L 47,57L 47,53 Z M 29,53L 29,57L 19,57L 19,53L 29,53 Z M 19,22L 57,22L 57,31L 19,31L 19,22 Z M 55,24L 53,24L 53,29L 55,29L 55,24 Z M 51,24L 49,24L 49,29L 51,29L 51,24 Z M 47,24L 45,24L 45,29L 47,29L 47,24 Z M 21,27L 21,29L 23,29L 23,27L 21,27 Z M 19,33L 57,33L 57,42L 19,42L 19,33 Z M 55,35L 53,35L 53,40L 55,40L 55,35 Z M 51,35L 49,35L 49,40L 51,40L 51,35 Z M 47,35L 45,35L 45,40L 47,40L 47,35 Z M 21,38L 21,40L 23,40L 23,38L 21,38 Z",
                 NetworkMonitor.GetInstances(hardwareConfig, metrics, parameters)
+                );
+        }
+
+        private MonitorPanel ClaudePanel(MonitorType type, HardwareConfig[] hardwareConfig, MetricConfig[] metrics, ConfigParam[] parameters)
+        {
+            return new MonitorPanel(
+                type.GetDescription(),
+                "M 38,19L 41.5,32.5L 57,38L 41.5,43.5L 38,57L 34.5,43.5L 19,38L 34.5,32.5L 38,19 Z",
+                ClaudeMonitor.GetInstances(hardwareConfig, metrics, parameters)
                 );
         }
 
@@ -1850,7 +1870,8 @@ namespace SidebarDiagnostics.Monitoring
         RAM,
         GPU,
         HD,
-        Network
+        Network,
+        Claude
     }
 
     [JsonObject(MemberSerialization.OptIn)]
@@ -2072,8 +2093,25 @@ namespace SidebarDiagnostics.Monitoring
         {
             get
             {
-                return new MonitorConfig[5]
+                return new MonitorConfig[6]
                 {
+                    new MonitorConfig()
+                    {
+                        Type = MonitorType.Claude,
+                        Enabled = true,
+                        Order = 6,
+                        Hardware = new HardwareConfig[0],
+                        Metrics = new MetricConfig[3]
+                        {
+                            new MetricConfig(MetricKey.ClaudeSession, true),
+                            new MetricConfig(MetricKey.ClaudeWeek, true),
+                            new MetricConfig(MetricKey.ClaudeReset, true)
+                        },
+                        Params = new ConfigParam[1]
+                        {
+                            ConfigParam.Defaults.HardwareNames
+                        }
+                    },
                     new MonitorConfig()
                     {
                         Type = MonitorType.CPU,
@@ -2408,6 +2446,10 @@ namespace SidebarDiagnostics.Monitoring
         NetworkExtIP = 27,
         NetworkIn = 18,
         NetworkOut = 19,
+
+        ClaudeSession = 28,
+        ClaudeWeek = 29,
+        ClaudeReset = 30,
 
         DriveLoadBar = 20,
         DriveLoad = 21,
@@ -3062,6 +3104,9 @@ namespace SidebarDiagnostics.Monitoring
                 case MonitorType.Network:
                     return Resources.Network;
 
+                case MonitorType.Claude:
+                    return Resources.Claude;
+
                 default:
                     throw new ArgumentException("Invalid MonitorType.");
             }
@@ -3160,6 +3205,15 @@ namespace SidebarDiagnostics.Monitoring
                 case MetricKey.DriveWrite:
                     return Resources.DriveWrite;
 
+                case MetricKey.ClaudeSession:
+                    return Resources.ClaudeSession;
+
+                case MetricKey.ClaudeWeek:
+                    return Resources.ClaudeWeek;
+
+                case MetricKey.ClaudeReset:
+                    return Resources.ClaudeReset;
+
                 default:
                     return "Unknown";
             }
@@ -3252,6 +3306,15 @@ namespace SidebarDiagnostics.Monitoring
 
                 case MetricKey.DriveWrite:
                     return Resources.DriveWriteLabel;
+
+                case MetricKey.ClaudeSession:
+                    return Resources.ClaudeSessionLabel;
+
+                case MetricKey.ClaudeWeek:
+                    return Resources.ClaudeWeekLabel;
+
+                case MetricKey.ClaudeReset:
+                    return Resources.ClaudeResetLabel;
 
                 default:
                     return "Unknown";

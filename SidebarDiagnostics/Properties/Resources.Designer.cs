@@ -761,6 +761,105 @@ namespace SidebarDiagnostics.Framework {
                 return ResourceManager.GetString("NetworkExtIPLabel", resourceCulture);
             }
         }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Claude.
+        /// </summary>
+        public static string Claude {
+            get {
+                return ResourceManager.GetString("Claude", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Add account....
+        /// </summary>
+        public static string SettingsClaudeAddAccount {
+            get {
+                return ResourceManager.GetString("SettingsClaudeAddAccount", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Select the .credentials.json file of a Claude config folder (CLAUDE_CONFIG_DIR)..
+        /// </summary>
+        public static string SettingsClaudeAddAccountTooltip {
+            get {
+                return ResourceManager.GetString("SettingsClaudeAddAccountTooltip", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Remove account.
+        /// </summary>
+        public static string SettingsClaudeRemoveAccount {
+            get {
+                return ResourceManager.GetString("SettingsClaudeRemoveAccount", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Removes the selected account from the list. The default account cannot be removed, only disabled..
+        /// </summary>
+        public static string SettingsClaudeRemoveAccountTooltip {
+            get {
+                return ResourceManager.GetString("SettingsClaudeRemoveAccountTooltip", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Session usage (5 hours).
+        /// </summary>
+        public static string ClaudeSession {
+            get {
+                return ResourceManager.GetString("ClaudeSession", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to 5h.
+        /// </summary>
+        public static string ClaudeSessionLabel {
+            get {
+                return ResourceManager.GetString("ClaudeSessionLabel", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Weekly usage.
+        /// </summary>
+        public static string ClaudeWeek {
+            get {
+                return ResourceManager.GetString("ClaudeWeek", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to 7d.
+        /// </summary>
+        public static string ClaudeWeekLabel {
+            get {
+                return ResourceManager.GetString("ClaudeWeekLabel", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Session reset.
+        /// </summary>
+        public static string ClaudeReset {
+            get {
+                return ResourceManager.GetString("ClaudeReset", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Reset.
+        /// </summary>
+        public static string ClaudeResetLabel {
+            get {
+                return ResourceManager.GetString("ClaudeResetLabel", resourceCulture);
+            }
+        }
         
         /// <summary>
         ///   Looks up a localized string similar to Bandwidth In.

@@ -1032,6 +1032,50 @@
     <value>Ext</value>
     <comment>Short label for network ext IP address metric</comment>
   </data>
+  <data name="Claude" xml:space="preserve">
+    <value>Claude</value>
+    <comment>Claude monitor title</comment>
+  </data>
+  <data name="SettingsClaudeAddAccount" xml:space="preserve">
+    <value>Add account...</value>
+    <comment>Settings Claude add account button</comment>
+  </data>
+  <data name="SettingsClaudeAddAccountTooltip" xml:space="preserve">
+    <value>Select the .credentials.json file of a Claude config folder (CLAUDE_CONFIG_DIR).</value>
+    <comment>Settings Claude add account tooltip</comment>
+  </data>
+  <data name="SettingsClaudeRemoveAccount" xml:space="preserve">
+    <value>Remove account</value>
+    <comment>Settings Claude remove account button</comment>
+  </data>
+  <data name="SettingsClaudeRemoveAccountTooltip" xml:space="preserve">
+    <value>Removes the selected account from the list. The default account cannot be removed, only disabled.</value>
+    <comment>Settings Claude remove account tooltip</comment>
+  </data>
+  <data name="ClaudeSession" xml:space="preserve">
+    <value>Session usage (5 hours)</value>
+    <comment>Full name for the Claude 5 hour session usage metric</comment>
+  </data>
+  <data name="ClaudeSessionLabel" xml:space="preserve">
+    <value>5h</value>
+    <comment>Short label for the Claude 5 hour session usage metric</comment>
+  </data>
+  <data name="ClaudeWeek" xml:space="preserve">
+    <value>Weekly usage</value>
+    <comment>Full name for the Claude weekly usage metric</comment>
+  </data>
+  <data name="ClaudeWeekLabel" xml:space="preserve">
+    <value>7d</value>
+    <comment>Short label for the Claude weekly usage metric</comment>
+  </data>
+  <data name="ClaudeReset" xml:space="preserve">
+    <value>Session reset</value>
+    <comment>Full name for the Claude session reset metric</comment>
+  </data>
+  <data name="ClaudeResetLabel" xml:space="preserve">
+    <value>Reset</value>
+    <comment>Short label for the Claude session reset metric</comment>
+  </data>
   <data name="SettingsShowMachineName" xml:space="preserve">
     <value>Show PC Name</value>
     <comment>Settings show machine name label</comment>
