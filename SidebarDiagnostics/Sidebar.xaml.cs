@@ -229,6 +229,28 @@ namespace SidebarDiagnostics
         {
             App.Current.Shutdown();
         }
+
+        private void ClaudeAlias_Click(object sender, RoutedEventArgs e)
+        {
+            Monitoring.ClaudeMonitor _monitor = (sender as FrameworkElement)?.DataContext as Monitoring.ClaudeMonitor;
+
+            if (_monitor == null)
+            {
+                return;
+            }
+
+            string _alias = Monitoring.ClaudeAliasPrompt.Show(this, _monitor.Alias, _monitor.DefaultName);
+
+            if (_alias != null)
+            {
+                _monitor.SetAlias(_alias);
+            }
+        }
+
+        private void ClaudeAliasClear_Click(object sender, RoutedEventArgs e)
+        {
+            ((sender as FrameworkElement)?.DataContext as Monitoring.ClaudeMonitor)?.SetAlias(null);
+        }
         
         private void Window_MouseEnter(object sender, MouseEventArgs e)
         {

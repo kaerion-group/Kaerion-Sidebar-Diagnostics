@@ -808,7 +808,7 @@ namespace SidebarDiagnostics.Framework {
         }
 
         /// <summary>
-        ///   Looks up a localized string similar to Removes the selected account from the list. The default account cannot be removed, only disabled..
+        ///   Looks up a localized string similar to Removes the selected account from the list. The default account and claude-swap accounts cannot be removed, only disabled..
         /// </summary>
         public static string SettingsClaudeRemoveAccountTooltip {
             get {
@@ -852,24 +852,6 @@ namespace SidebarDiagnostics.Framework {
             }
         }
 
-        /// <summary>
-        ///   Looks up a localized string similar to Session reset.
-        /// </summary>
-        public static string ClaudeReset {
-            get {
-                return ResourceManager.GetString("ClaudeReset", resourceCulture);
-            }
-        }
-
-        /// <summary>
-        ///   Looks up a localized string similar to Reset.
-        /// </summary>
-        public static string ClaudeResetLabel {
-            get {
-                return ResourceManager.GetString("ClaudeResetLabel", resourceCulture);
-            }
-        }
-        
         /// <summary>
         ///   Looks up a localized string similar to Bandwidth In.
         /// </summary>

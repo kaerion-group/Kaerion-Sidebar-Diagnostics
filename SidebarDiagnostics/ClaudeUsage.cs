@@ -1,20 +1,24 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Text;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Controls;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
 namespace SidebarDiagnostics.Monitoring
 {
     /// <summary>
-    /// Una cuenta de Claude: apunta al .credentials.json de su carpeta de configuracion
-    /// (CLAUDE_CONFIG_DIR). Los tokens nunca se copian: se leen del archivo en cada consulta.
+    /// Una cuenta de Claude. Puede venir de claude-swap (SwapEmail) o apuntar al .credentials.json
+    /// de su carpeta de configuracion (CLAUDE_CONFIG_DIR). Los tokens nunca se copian: se leen
+    /// del archivo en cada consulta.
     /// </summary>
     [JsonObject(MemberSerialization.OptIn)]
     public class ClaudeAccount
@@ -27,11 +31,21 @@ namespace SidebarDiagnostics.Monitoring
 
         [JsonProperty]
         public string CredentialsPath { get; set; }
+
+        // Solo para cuentas detectadas en claude-swap; no se guardan.
+        public string SwapEmail { get; set; }
+
+        public bool IsSwap
+        {
+            get { return !string.IsNullOrEmpty(SwapEmail); }
+        }
     }
 
     public static class ClaudeAccountStore
     {
         public const string DEFAULTID = "default";
+
+        public const string SWAPPREFIX = "swap:";
 
         private const string FILENAME = "claude-accounts.json";
 
@@ -57,34 +71,40 @@ namespace SidebarDiagnostics.Monitoring
             }
         }
 
-        /// <summary>Cuentas guardadas mas la cuenta por defecto de este equipo, si existe.</summary>
+        /// <summary>
+        /// Cuentas de claude-swap (si esta instalado), mas las guardadas a mano y la cuenta por defecto
+        /// de este equipo que no esten ya en claude-swap.
+        /// </summary>
         public static ClaudeAccount[] Load()
         {
-            List<ClaudeAccount> _accounts = new List<ClaudeAccount>();
+            List<ClaudeAccount> _accounts = ClaudeSwap.List(ClaudeSwap.MAXAGE).Select(s => new ClaudeAccount()
+            {
+                ID = SWAPPREFIX + s.Email,
+                Name = string.IsNullOrEmpty(s.Alias) ? s.Email : s.Alias,
+                SwapEmail = s.Email
+            }).ToList();
+
+            List<ClaudeAccount> _local = new List<ClaudeAccount>();
 
             lock (_lock)
             {
-                try
-                {
-                    if (File.Exists(StoreFile))
-                    {
-                        ClaudeAccount[] _saved = JsonConvert.DeserializeObject<ClaudeAccount[]>(File.ReadAllText(StoreFile));
-
-                        if (_saved != null)
-                        {
-                            _accounts.AddRange(_saved.Where(a => a != null && !string.IsNullOrEmpty(a.ID)));
-                        }
-                    }
-                }
-                catch (Exception)
-                {
-                    // archivo corrupto: se ignora y se sigue con la cuenta por defecto
-                }
+                _local.AddRange(LoadSaved().Where(a => !string.IsNullOrEmpty(a.ID)));
             }
 
-            if (_accounts.All(a => a.ID != DEFAULTID) && File.Exists(DefaultCredentialsPath))
+            if (_local.All(a => a.ID != DEFAULTID) && File.Exists(DefaultCredentialsPath))
             {
-                _accounts.Insert(0, new ClaudeAccount() { ID = DEFAULTID, Name = GetEmail(DefaultCredentialsPath) ?? "Claude", CredentialsPath = DefaultCredentialsPath });
+                _local.Insert(0, new ClaudeAccount() { ID = DEFAULTID, Name = GetEmail(DefaultCredentialsPath) ?? "Claude", CredentialsPath = DefaultCredentialsPath });
+            }
+
+            // Una cuenta que ya gestiona claude-swap no se repite.
+            foreach (ClaudeAccount _account in _local)
+            {
+                string _email = GetEmail(_account.CredentialsPath);
+
+                if (_email == null || _accounts.All(a => !string.Equals(a.SwapEmail, _email, StringComparison.OrdinalIgnoreCase)))
+                {
+                    _accounts.Add(_account);
+                }
             }
 
             return _accounts.ToArray();
@@ -98,6 +118,11 @@ namespace SidebarDiagnostics.Monitoring
         {
             try
             {
+                if (string.IsNullOrEmpty(credentialsPath))
+                {
+                    return null;
+                }
+
                 string _dir = Path.GetDirectoryName(credentialsPath);
 
                 List<string> _candidates = new List<string>() { Path.Combine(_dir, ".claude.json") };
@@ -202,6 +227,43 @@ namespace SidebarDiagnostics.Monitoring
             }
         }
 
+        /// <summary>Texto para la columna de estado en Ajustes.</summary>
+        public static string Describe(ClaudeAccount account)
+        {
+            if (account.IsSwap)
+            {
+                ClaudeSwapAccount _swap = ClaudeSwap.List(ClaudeSwap.MAXAGE).FirstOrDefault(s => string.Equals(s.Email, account.SwapEmail, StringComparison.OrdinalIgnoreCase));
+
+                if (_swap == null)
+                {
+                    return "claude-swap: cuenta no encontrada";
+                }
+
+                List<string> _parts = new List<string>() { string.Format("claude-swap #{0}", _swap.Number) };
+
+                if (_swap.Active)
+                {
+                    _parts.Add("activa");
+                }
+
+                if (_swap.Usage.Status != ClaudeUsageStatus.Ok)
+                {
+                    _parts.Add("sin datos de uso");
+                }
+                else if (_swap.FetchedAt.HasValue)
+                {
+                    _parts.Add("datos de hace " + ClaudeMetric.FormatSpan(DateTime.UtcNow - _swap.FetchedAt.Value));
+                }
+
+                return string.Join(" - ", _parts);
+            }
+
+            string _email = GetEmail(account.CredentialsPath);
+            string _status = DescribeStatus(account.CredentialsPath);
+
+            return string.IsNullOrEmpty(_email) ? _status : string.Format("{0} - {1}", _email, _status);
+        }
+
         public static ClaudeAccount Add(string credentialsPath, string name)
         {
             ClaudeAccount _account = new ClaudeAccount()
@@ -249,7 +311,10 @@ namespace SidebarDiagnostics.Monitoring
                     }
                 }
             }
-            catch (Exception) { }
+            catch (Exception)
+            {
+                // archivo corrupto: se ignora y se sigue con las demas cuentas
+            }
 
             return new List<ClaudeAccount>();
         }
@@ -262,6 +327,189 @@ namespace SidebarDiagnostics.Monitoring
         }
     }
 
+    public class ClaudeSwapAccount
+    {
+        public int Number { get; set; }
+
+        public string Email { get; set; }
+
+        public string Alias { get; set; }
+
+        public bool Active { get; set; }
+
+        public DateTime? FetchedAt { get; set; }
+
+        public ClaudeUsage Usage { get; set; }
+    }
+
+    /// <summary>
+    /// Lee las cuentas de claude-swap con "claude-swap list --json" (salida documentada para scripts).
+    /// Solo devuelve correos y uso ya calculado: la app no toca sus credenciales cifradas.
+    /// </summary>
+    public static class ClaudeSwap
+    {
+        public static readonly TimeSpan MAXAGE = TimeSpan.FromSeconds(90);
+
+        private static readonly TimeSpan TIMEOUT = TimeSpan.FromSeconds(20);
+
+        private static readonly object _lock = new object();
+
+        private static ClaudeSwapAccount[] _cache = new ClaudeSwapAccount[0];
+
+        private static DateTime _cachedAt = DateTime.MinValue;
+
+        private static bool _lastOk = false;
+
+        public static string ExePath
+        {
+            get
+            {
+                string _local = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "bin", "claude-swap.exe");
+
+                if (File.Exists(_local))
+                {
+                    return _local;
+                }
+
+                foreach (string _dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator))
+                {
+                    try
+                    {
+                        string _candidate = Path.Combine(_dir.Trim(), "claude-swap.exe");
+
+                        if (File.Exists(_candidate))
+                        {
+                            return _candidate;
+                        }
+                    }
+                    catch (ArgumentException) { }
+                }
+
+                return null;
+            }
+        }
+
+        /// <summary>True si la ultima lectura de claude-swap funciono.</summary>
+        public static bool LastOk
+        {
+            get { lock (_lock) { return _lastOk; } }
+        }
+
+        /// <summary>Cuentas de claude-swap; reutiliza la ultima lectura si tiene menos de maxAge.</summary>
+        public static ClaudeSwapAccount[] List(TimeSpan maxAge)
+        {
+            lock (_lock)
+            {
+                if (DateTime.UtcNow - _cachedAt < maxAge)
+                {
+                    return _cache;
+                }
+
+                _cachedAt = DateTime.UtcNow;
+
+                string _json = Run("list --json");
+
+                _lastOk = _json != null;
+
+                if (_lastOk)
+                {
+                    try
+                    {
+                        _cache = Parse(JObject.Parse(_json));
+                    }
+                    catch (Exception)
+                    {
+                        _lastOk = false;
+                    }
+                }
+
+                return _cache;
+            }
+        }
+
+        private static string Run(string arguments)
+        {
+            string _exe = ExePath;
+
+            if (_exe == null)
+            {
+                return null;
+            }
+
+            try
+            {
+                using (Process _process = new Process())
+                {
+                    _process.StartInfo = new ProcessStartInfo(_exe, arguments)
+                    {
+                        UseShellExecute = false,
+                        CreateNoWindow = true,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        StandardOutputEncoding = Encoding.UTF8
+                    };
+
+                    _process.Start();
+
+                    Task<string> _output = _process.StandardOutput.ReadToEndAsync();
+                    Task<string> _errors = _process.StandardError.ReadToEndAsync();
+
+                    if (!_process.WaitForExit((int)TIMEOUT.TotalMilliseconds))
+                    {
+                        try { _process.Kill(); } catch (Exception) { }
+
+                        return null;
+                    }
+
+                    return _process.ExitCode == 0 ? _output.Result : null;
+                }
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
+        private static ClaudeSwapAccount[] Parse(JObject json)
+        {
+            JArray _accounts = json["accounts"] as JArray;
+
+            if (_accounts == null)
+            {
+                return new ClaudeSwapAccount[0];
+            }
+
+            return _accounts.OfType<JObject>().Where(a => !string.IsNullOrEmpty((string)a["email"])).Select(a =>
+            {
+                JObject _usage = a["usage"] as JObject;
+
+                ClaudeUsage _result = new ClaudeUsage();
+
+                if ((string)a["usageStatus"] != "ok" || _usage == null)
+                {
+                    _result.Status = ClaudeUsageStatus.Unavailable;
+                }
+                else
+                {
+                    _result.SessionPercent = (double?)_usage["fiveHour"]?["pct"];
+                    _result.SessionReset = ClaudeUsageClient.ParseDate(_usage["fiveHour"]?["resetsAt"]);
+                    _result.WeekPercent = (double?)_usage["sevenDay"]?["pct"];
+                    _result.WeekReset = ClaudeUsageClient.ParseDate(_usage["sevenDay"]?["resetsAt"]);
+                }
+
+                return new ClaudeSwapAccount()
+                {
+                    Number = (int?)a["number"] ?? 0,
+                    Email = (string)a["email"],
+                    Alias = (string)a["alias"],
+                    Active = (bool?)a["active"] ?? false,
+                    FetchedAt = ClaudeUsageClient.ParseDate(a["usageFetchedAt"]),
+                    Usage = _result
+                };
+            }).OrderBy(a => a.Number).ToArray();
+        }
+    }
+
     public enum ClaudeUsageStatus : byte
     {
         Ok,
@@ -269,6 +517,7 @@ namespace SidebarDiagnostics.Monitoring
         TokenExpired,
         SessionExpired,
         RateLimited,
+        Unavailable,
         Error
     }
 
@@ -300,6 +549,40 @@ namespace SidebarDiagnostics.Monitoring
             _client.DefaultRequestHeaders.UserAgent.ParseAdd("SidebarDiagnostics-ClaudeMonitor/1.0");
 
             return _client;
+        }
+
+        /// <summary>
+        /// Cuentas de claude-swap: la activa se consulta directo con ~/.claude (dato al minuto) y las
+        /// demas salen de la cache de claude-swap. El resto de cuentas, directo con su .credentials.json.
+        /// </summary>
+        public static async Task<ClaudeUsage> FetchAsync(ClaudeAccount account)
+        {
+            if (!account.IsSwap)
+            {
+                return await FetchAsync(account.CredentialsPath).ConfigureAwait(false);
+            }
+
+            ClaudeSwapAccount _swap = (await Task.Run(() => ClaudeSwap.List(ClaudeSwap.MAXAGE)).ConfigureAwait(false))
+                .FirstOrDefault(s => string.Equals(s.Email, account.SwapEmail, StringComparison.OrdinalIgnoreCase));
+
+            if (_swap == null)
+            {
+                return new ClaudeUsage() { Status = ClaudeSwap.LastOk ? ClaudeUsageStatus.NoCredentials : ClaudeUsageStatus.Error };
+            }
+
+            string _default = ClaudeAccountStore.DefaultCredentialsPath;
+
+            if (_swap.Active && string.Equals(ClaudeAccountStore.GetEmail(_default), _swap.Email, StringComparison.OrdinalIgnoreCase))
+            {
+                ClaudeUsage _direct = await FetchAsync(_default).ConfigureAwait(false);
+
+                if (_direct.Status == ClaudeUsageStatus.Ok || _swap.Usage.Status != ClaudeUsageStatus.Ok)
+                {
+                    return _direct;
+                }
+            }
+
+            return _swap.Usage;
         }
 
         public static async Task<ClaudeUsage> FetchAsync(string credentialsPath)
@@ -407,13 +690,24 @@ namespace SidebarDiagnostics.Monitoring
             reset = ParseDate(limit["resets_at"]);
         }
 
-        private static DateTime? ParseDate(JToken token)
+        public static DateTime? ParseDate(JToken token)
         {
-            string _value = token == null || token.Type == JTokenType.Null ? null : (string)token;
+            if (token == null || token.Type == JTokenType.Null)
+            {
+                return null;
+            }
+
+            // Newtonsoft ya convierte las fechas ISO al leer el JSON.
+            if (token.Type == JTokenType.Date)
+            {
+                object _raw = ((JValue)token).Value;
+
+                return _raw is DateTimeOffset ? ((DateTimeOffset)_raw).UtcDateTime : ((DateTime)_raw).ToUniversalTime();
+            }
 
             DateTimeOffset _date;
 
-            if (_value != null && DateTimeOffset.TryParse(_value, out _date))
+            if (DateTimeOffset.TryParse((string)token, out _date))
             {
                 return _date.UtcDateTime;
             }
@@ -422,22 +716,32 @@ namespace SidebarDiagnostics.Monitoring
         }
     }
 
+    /// <summary>Porcentaje de una ventana de uso con la cuenta atras de su reinicio en la misma linea.</summary>
     public class ClaudeMetric : BaseMetric
     {
-        public ClaudeMetric(MetricKey key, bool numeric) : base(key, DataType.Percent)
+        public ClaudeMetric(MetricKey key) : base(key, DataType.Percent)
         {
-            _numeric = numeric;
-
             Text = "...";
         }
 
-        public void SetPercent(double value)
+        public void SetUsage(double? percent, DateTime? reset)
         {
-            Update(Math.Round(value));
+            if (percent.HasValue)
+            {
+                _percent = Math.Round(percent.Value);
+                Value = nValue = _percent.Value;
+            }
+
+            _reset = reset;
+            _showStatus = false;
+
+            Refresh();
         }
 
-        public void SetText(string text)
+        public void SetStatus(string text)
         {
+            _showStatus = true;
+
             Text = text;
         }
 
@@ -449,12 +753,52 @@ namespace SidebarDiagnostics.Monitoring
             }
         }
 
-        public override bool IsNumeric
+        /// <summary>Recalcula la cuenta atras; se llama en cada actualizacion del sidebar.</summary>
+        public void Refresh()
         {
-            get { return _numeric; }
+            if (_showStatus || !_percent.HasValue)
+            {
+                return;
+            }
+
+            string _text = string.Format("{0}%", _percent.Value);
+
+            if (_reset.HasValue)
+            {
+                _text += " \u00B7 " + FormatSpan(_reset.Value - DateTime.UtcNow);
+            }
+
+            if (Text != _text)
+            {
+                Text = _text;
+            }
         }
 
-        private bool _numeric { get; set; }
+        public static string FormatSpan(TimeSpan span)
+        {
+            if (span <= TimeSpan.Zero)
+            {
+                return "0m";
+            }
+
+            if (span.TotalDays >= 1)
+            {
+                return string.Format("{0}d {1}h", (int)span.TotalDays, span.Hours);
+            }
+
+            if (span.TotalHours >= 1)
+            {
+                return string.Format("{0}h {1:00}m", (int)span.TotalHours, span.Minutes);
+            }
+
+            return string.Format("{0}m", Math.Max(1, span.Minutes));
+        }
+
+        private double? _percent { get; set; }
+
+        private DateTime? _reset { get; set; }
+
+        private bool _showStatus { get; set; } = false;
     }
 
     public class ClaudeMonitor : BaseMonitor
@@ -462,28 +806,25 @@ namespace SidebarDiagnostics.Monitoring
         private static readonly TimeSpan REFRESH = TimeSpan.FromMinutes(2);
         private static readonly TimeSpan BACKOFF = TimeSpan.FromMinutes(5);
 
-        public ClaudeMonitor(string id, string name, string credentialsPath, MetricConfig[] metrics, bool showName = true) : base(id, name, showName)
+        public ClaudeMonitor(ClaudeAccount account, string alias, MetricConfig[] metrics, bool showName = true) : base(account.ID, string.IsNullOrEmpty(alias) ? account.Name : alias, showName)
         {
-            _credentialsPath = credentialsPath;
+            _account = account;
+
+            DefaultName = account.Name;
+            Alias = alias;
 
             List<iMetric> _metrics = new List<iMetric>();
 
             if (metrics.IsEnabled(MetricKey.ClaudeSession))
             {
-                _session = new ClaudeMetric(MetricKey.ClaudeSession, true);
+                _session = new ClaudeMetric(MetricKey.ClaudeSession);
                 _metrics.Add(_session);
             }
 
             if (metrics.IsEnabled(MetricKey.ClaudeWeek))
             {
-                _week = new ClaudeMetric(MetricKey.ClaudeWeek, true);
+                _week = new ClaudeMetric(MetricKey.ClaudeWeek);
                 _metrics.Add(_week);
-            }
-
-            if (metrics.IsEnabled(MetricKey.ClaudeReset))
-            {
-                _resetMetric = new ClaudeMetric(MetricKey.ClaudeReset, false);
-                _metrics.Add(_resetMetric);
             }
 
             Metrics = _metrics.ToArray();
@@ -496,17 +837,8 @@ namespace SidebarDiagnostics.Monitoring
                 ID = a.ID,
                 Name = a.Name,
                 ActualName = a.Name,
-                Info = DescribeAccount(a)
+                Info = ClaudeAccountStore.Describe(a)
             });
-        }
-
-        // Texto para la lista de cuentas en Ajustes: correo y estado del token.
-        private static string DescribeAccount(ClaudeAccount account)
-        {
-            string _email = ClaudeAccountStore.GetEmail(account.CredentialsPath);
-            string _status = ClaudeAccountStore.DescribeStatus(account.CredentialsPath);
-
-            return string.IsNullOrEmpty(_email) ? _status : string.Format("{0} - {1}", _email, _status);
         }
 
         public static iMonitor[] GetInstances(HardwareConfig[] hardwareConfig, MetricConfig[] metrics, ConfigParam[] parameters)
@@ -518,11 +850,47 @@ namespace SidebarDiagnostics.Monitoring
             return (
                 from acc in _accounts
                 join c in hardwareConfig on acc.ID equals c.ID into merged
-                from n in merged.DefaultIfEmpty(new HardwareConfig() { ID = acc.ID, Name = acc.Name, ActualName = acc.Name })
+                from n in merged.DefaultIfEmpty(new HardwareConfig() { ID = acc.ID, Name = null, ActualName = acc.Name })
                 where n.Enabled
-                orderby n.Order descending, n.Name ascending
-                select new ClaudeMonitor(acc.ID, string.IsNullOrEmpty(n.Name) ? acc.Name : n.Name, acc.CredentialsPath, metrics, _showName)
+                orderby n.Order descending, (string.IsNullOrEmpty(n.Name) ? acc.Name : n.Name) ascending
+                select new ClaudeMonitor(acc, string.Equals(n.Name, acc.Name, StringComparison.Ordinal) ? null : n.Name, metrics, _showName)
                 ).ToArray();
+        }
+
+        /// <summary>Correo (o alias de claude-swap) de la cuenta, usado cuando no hay pseudonimo.</summary>
+        public string DefaultName { get; private set; }
+
+        /// <summary>Pseudonimo puesto en el sidebar o en Ajustes; null si no hay.</summary>
+        public string Alias { get; private set; }
+
+        /// <summary>Cambia el pseudonimo y lo guarda en la configuracion del monitor (nombre del hardware).</summary>
+        public void SetAlias(string alias)
+        {
+            alias = string.IsNullOrWhiteSpace(alias) ? null : alias.Trim();
+
+            MonitorConfig _config = Framework.Settings.Instance.MonitorConfig?.FirstOrDefault(c => c.Type == MonitorType.Claude);
+
+            if (_config != null)
+            {
+                List<HardwareConfig> _hardware = (_config.Hardware ?? new HardwareConfig[0]).ToList();
+
+                HardwareConfig _record = _hardware.FirstOrDefault(h => h.ID == ID);
+
+                if (_record == null)
+                {
+                    _record = new HardwareConfig() { ID = ID, Enabled = true };
+                    _hardware.Add(_record);
+                }
+
+                _record.Name = alias;
+
+                _config.Hardware = _hardware.ToArray();
+
+                Framework.Settings.Instance.Save();
+            }
+
+            Alias = alias;
+            Name = alias ?? DefaultName;
         }
 
         public override void Update()
@@ -531,15 +899,16 @@ namespace SidebarDiagnostics.Monitoring
             {
                 _busy = true;
 
-                Refresh();
+                Fetch();
             }
 
-            ShowReset();
+            _session?.Refresh();
+            _week?.Refresh();
         }
 
-        private async void Refresh()
+        private async void Fetch()
         {
-            ClaudeUsage _usage = await ClaudeUsageClient.FetchAsync(_credentialsPath).ConfigureAwait(false);
+            ClaudeUsage _usage = await ClaudeUsageClient.FetchAsync(_account).ConfigureAwait(false);
 
             Application _app = Application.Current;
 
@@ -559,74 +928,31 @@ namespace SidebarDiagnostics.Monitoring
 
         private void Apply(ClaudeUsage usage)
         {
-            _status = usage.Status;
-
             if (usage.Status != ClaudeUsageStatus.Ok)
             {
-                // Se conservan los ultimos valores buenos; el aviso va en la linea de reinicio
-                // (o en el primer metric si no esta activa), resaltado como alerta.
-                ClaudeMetric _target = _resetMetric ?? _session ?? _week;
+                // Se conservan los ultimos valores buenos de la semana; el aviso va en la primera
+                // linea, resaltado como alerta.
+                ClaudeMetric _target = _session ?? _week;
 
                 if (_target != null)
                 {
-                    _target.SetText(StatusText(usage.Status));
+                    _target.SetStatus(StatusText(usage.Status));
                     _target.SetAlert(true);
                 }
 
                 return;
             }
 
-            foreach (ClaudeMetric _metric in new ClaudeMetric[] { _session, _week, _resetMetric })
+            if (_session != null)
             {
-                if (_metric != null)
-                {
-                    _metric.SetAlert(false);
-                }
+                _session.SetAlert(false);
+                _session.SetUsage(usage.SessionPercent, usage.SessionReset);
             }
 
-            _hasData = true;
-
-            _sessionReset = usage.SessionReset;
-
-            if (_session != null && usage.SessionPercent.HasValue)
+            if (_week != null)
             {
-                _session.SetPercent(usage.SessionPercent.Value);
-            }
-
-            if (_week != null && usage.WeekPercent.HasValue)
-            {
-                _week.SetPercent(usage.WeekPercent.Value);
-            }
-
-            ShowReset();
-        }
-
-        private void ShowReset()
-        {
-            if (_resetMetric == null || _status != ClaudeUsageStatus.Ok || !_hasData)
-            {
-                return;
-            }
-
-            if (!_sessionReset.HasValue)
-            {
-                _resetMetric.SetText("-");
-                return;
-            }
-
-            TimeSpan _left = _sessionReset.Value - DateTime.UtcNow;
-
-            if (_left <= TimeSpan.Zero)
-            {
-                _resetMetric.SetText("0m");
-            }
-            else if (_left.TotalHours >= 1)
-            {
-                _resetMetric.SetText(string.Format("{0}h {1:00}m", (int)_left.TotalHours, _left.Minutes));
-            }
-            else
-            {
-                _resetMetric.SetText(string.Format("{0}m", Math.Max(1, _left.Minutes)));
+                _week.SetAlert(false);
+                _week.SetUsage(usage.WeekPercent, usage.WeekReset);
             }
         }
 
@@ -646,27 +972,70 @@ namespace SidebarDiagnostics.Monitoring
                 case ClaudeUsageStatus.RateLimited:
                     return "limitado (429)";
 
+                case ClaudeUsageStatus.Unavailable:
+                    return "sin datos";
+
                 default:
                     return "sin conexion";
             }
         }
 
-        private string _credentialsPath { get; set; }
+        private ClaudeAccount _account { get; set; }
 
         private ClaudeMetric _session { get; set; }
 
         private ClaudeMetric _week { get; set; }
 
-        private ClaudeMetric _resetMetric { get; set; }
-
-        private DateTime? _sessionReset { get; set; }
-
-        private ClaudeUsageStatus _status { get; set; } = ClaudeUsageStatus.Ok;
-
-        private bool _hasData { get; set; } = false;
-
         private bool _busy { get; set; } = false;
 
         private DateTime _nextFetch { get; set; } = DateTime.MinValue;
+    }
+
+    /// <summary>Ventana minima para escribir el pseudonimo de una cuenta.</summary>
+    public static class ClaudeAliasPrompt
+    {
+        /// <summary>Devuelve el texto escrito ("" para quitar el pseudonimo) o null si se cancela.</summary>
+        public static string Show(Window owner, string current, string defaultName)
+        {
+            TextBox _input = new TextBox() { Text = current ?? "", MinWidth = 280, Margin = new Thickness(0, 6, 0, 12), Padding = new Thickness(3) };
+
+            Button _ok = new Button() { Content = "Aceptar", IsDefault = true, MinWidth = 80, Margin = new Thickness(0, 0, 8, 0), Padding = new Thickness(8, 3, 8, 3) };
+            Button _cancel = new Button() { Content = "Cancelar", IsCancel = true, MinWidth = 80, Padding = new Thickness(8, 3, 8, 3) };
+
+            StackPanel _buttons = new StackPanel() { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+            _buttons.Children.Add(_ok);
+            _buttons.Children.Add(_cancel);
+
+            StackPanel _panel = new StackPanel() { Margin = new Thickness(14) };
+            _panel.Children.Add(new TextBlock() { Text = string.Format("Pseudonimo para {0}\n(vacio para mostrar el correo)", defaultName) });
+            _panel.Children.Add(_input);
+            _panel.Children.Add(_buttons);
+
+            Window _window = new Window()
+            {
+                Title = "Pseudonimo",
+                Content = _panel,
+                SizeToContent = SizeToContent.WidthAndHeight,
+                ResizeMode = ResizeMode.NoResize,
+                WindowStartupLocation = WindowStartupLocation.CenterScreen,
+                ShowInTaskbar = false,
+                Topmost = true
+            };
+
+            if (owner != null && owner.IsVisible)
+            {
+                _window.Owner = owner;
+            }
+
+            _ok.Click += (s, e) => { _window.DialogResult = true; };
+
+            _window.Loaded += (s, e) =>
+            {
+                _input.Focus();
+                _input.SelectAll();
+            };
+
+            return _window.ShowDialog() == true ? _input.Text : null;
+        }
     }
 }

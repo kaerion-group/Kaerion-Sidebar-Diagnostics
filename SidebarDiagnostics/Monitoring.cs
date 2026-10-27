@@ -2101,11 +2101,10 @@ namespace SidebarDiagnostics.Monitoring
                         Enabled = true,
                         Order = 6,
                         Hardware = new HardwareConfig[0],
-                        Metrics = new MetricConfig[3]
+                        Metrics = new MetricConfig[2]
                         {
                             new MetricConfig(MetricKey.ClaudeSession, true),
-                            new MetricConfig(MetricKey.ClaudeWeek, true),
-                            new MetricConfig(MetricKey.ClaudeReset, true)
+                            new MetricConfig(MetricKey.ClaudeWeek, true)
                         },
                         Params = new ConfigParam[1]
                         {
@@ -2466,7 +2465,7 @@ namespace SidebarDiagnostics.Monitoring
 
         ClaudeSession = 28,
         ClaudeWeek = 29,
-        ClaudeReset = 30,
+        // 30 era ClaudeReset: el reinicio ahora va junto a cada porcentaje.
 
         DriveLoadBar = 20,
         DriveLoad = 21,
@@ -3228,9 +3227,6 @@ namespace SidebarDiagnostics.Monitoring
                 case MetricKey.ClaudeWeek:
                     return Resources.ClaudeWeek;
 
-                case MetricKey.ClaudeReset:
-                    return Resources.ClaudeReset;
-
                 default:
                     return "Unknown";
             }
@@ -3329,9 +3325,6 @@ namespace SidebarDiagnostics.Monitoring
 
                 case MetricKey.ClaudeWeek:
                     return Resources.ClaudeWeekLabel;
-
-                case MetricKey.ClaudeReset:
-                    return Resources.ClaudeResetLabel;
 
                 default:
                     return "Unknown";

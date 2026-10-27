@@ -171,6 +171,45 @@
                                                 </StackPanel>
                                             </DataTemplate>
 
+                                            <DataTemplate DataType="{x:Type monitor:ClaudeMonitor}">
+                                                <StackPanel Style="{StaticResource MonitorPanel}">
+                                                    <TextBlock Text="{Binding Path=Name, Mode=OneWay}" ToolTip="{Binding Path=DefaultName, Mode=OneWay}">
+                                                        <TextBlock.Style>
+                                                            <Style TargetType="{x:Type TextBlock}" BasedOn="{StaticResource HardwareText}">
+                                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding Path=ShowName, Mode=OneWay}" Value="True">
+                                                                        <Setter Property="Visibility" Value="Visible" />
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </TextBlock.Style>
+                                                        <TextBlock.ContextMenu>
+                                                            <ContextMenu>
+                                                                <MenuItem Header="Pseudonimo..." Click="ClaudeAlias_Click" />
+                                                                <MenuItem Header="Mostrar correo" Click="ClaudeAliasClear_Click" />
+                                                            </ContextMenu>
+                                                        </TextBlock.ContextMenu>
+                                                    </TextBlock>
+
+                                                    <ItemsControl ItemsSource="{Binding Path=Metrics, Mode=OneWay}">
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate DataType="{x:Type monitor:iMetric}">
+                                                                <DockPanel Style="{StaticResource MetricPanel}">
+                                                                    <TextBlock Text="{Binding Path=Label, Mode=OneWay, Converter={StaticResource MetricLabelConverter}}" Style="{StaticResource MetricLabel}" />
+                                                                    <TextBlock Text="{Binding Path=Text, Mode=OneWay}" Style="{StaticResource MetricValue}" />
+                                                                </DockPanel>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                        <ItemsControl.ItemsPanel>
+                                                            <ItemsPanelTemplate>
+                                                                <StackPanel Style="{StaticResource VerticalPanel}" />
+                                                            </ItemsPanelTemplate>
+                                                        </ItemsControl.ItemsPanel>
+                                                    </ItemsControl>
+                                                </StackPanel>
+                                            </DataTemplate>
+
                                             <DataTemplate DataType="{x:Type monitor:DriveMonitor}">
                                                 <StackPanel Style="{StaticResource MonitorPanel}">
                                                     <ContentControl>

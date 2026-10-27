@@ -1053,7 +1053,7 @@
     <comment>Settings Claude remove account button</comment>
   </data>
   <data name="SettingsClaudeRemoveAccountTooltip" xml:space="preserve">
-    <value>Removes the selected account from the list. The default account cannot be removed, only disabled.</value>
+    <value>Removes the selected account from the list. The default account and claude-swap accounts cannot be removed, only disabled.</value>
     <comment>Settings Claude remove account tooltip</comment>
   </data>
   <data name="ClaudeSession" xml:space="preserve">
@@ -1071,14 +1071,6 @@
   <data name="ClaudeWeekLabel" xml:space="preserve">
     <value>7d</value>
     <comment>Short label for the Claude weekly usage metric</comment>
-  </data>
-  <data name="ClaudeReset" xml:space="preserve">
-    <value>Session reset</value>
-    <comment>Full name for the Claude session reset metric</comment>
-  </data>
-  <data name="ClaudeResetLabel" xml:space="preserve">
-    <value>Reset</value>
-    <comment>Short label for the Claude session reset metric</comment>
   </data>
   <data name="SettingsShowMachineName" xml:space="preserve">
     <value>Show PC Name</value>

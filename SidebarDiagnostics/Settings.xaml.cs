@@ -103,9 +103,10 @@ namespace SidebarDiagnostics
             Monitoring.HardwareConfig _selected = (sender as FrameworkElement)?.Tag as Monitoring.HardwareConfig;
             Monitoring.MonitorConfig _config = (sender as FrameworkElement)?.DataContext as Monitoring.MonitorConfig;
 
-            if (_selected == null || _config == null || _selected.ID == Monitoring.ClaudeAccountStore.DEFAULTID)
+            if (_selected == null || _config == null || _selected.ID == Monitoring.ClaudeAccountStore.DEFAULTID || _selected.ID.StartsWith(Monitoring.ClaudeAccountStore.SWAPPREFIX))
             {
-                // la cuenta por defecto sale de ~/.claude: se desactiva con su casilla, no se quita
+                // la cuenta por defecto sale de ~/.claude y las de claude-swap de esa herramienta:
+                // se desactivan con su casilla, no se quitan
                 return;
             }
 
