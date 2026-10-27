@@ -1036,6 +1036,10 @@
     <value>Claude</value>
     <comment>Claude monitor title</comment>
   </data>
+  <data name="SettingsHardwareColumnInfo" xml:space="preserve">
+    <value>Status</value>
+    <comment>Settings hardware list status column header</comment>
+  </data>
   <data name="SettingsClaudeAddAccount" xml:space="preserve">
     <value>Add account...</value>
     <comment>Settings Claude add account button</comment>

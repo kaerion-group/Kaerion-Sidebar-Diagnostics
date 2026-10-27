@@ -84,10 +84,122 @@ namespace SidebarDiagnostics.Monitoring
 
             if (_accounts.All(a => a.ID != DEFAULTID) && File.Exists(DefaultCredentialsPath))
             {
-                _accounts.Insert(0, new ClaudeAccount() { ID = DEFAULTID, Name = "Claude", CredentialsPath = DefaultCredentialsPath });
+                _accounts.Insert(0, new ClaudeAccount() { ID = DEFAULTID, Name = GetEmail(DefaultCredentialsPath) ?? "Claude", CredentialsPath = DefaultCredentialsPath });
             }
 
             return _accounts.ToArray();
+        }
+
+        /// <summary>
+        /// Correo de la cuenta, leido del .claude.json que Claude Code guarda junto a las credenciales
+        /// (o en ~/.claude.json para la carpeta por defecto). Sin red; null si no se encuentra.
+        /// </summary>
+        public static string GetEmail(string credentialsPath)
+        {
+            try
+            {
+                string _dir = Path.GetDirectoryName(credentialsPath);
+
+                List<string> _candidates = new List<string>() { Path.Combine(_dir, ".claude.json") };
+
+                if (string.Equals(_dir.TrimEnd('\\', '/'), Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude"), StringComparison.OrdinalIgnoreCase))
+                {
+                    _candidates.Insert(0, Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude.json"));
+                }
+
+                foreach (string _file in _candidates.Where(File.Exists))
+                {
+                    string _email = (string)JObject.Parse(File.ReadAllText(_file))["oauthAccount"]?["emailAddress"];
+
+                    if (!string.IsNullOrEmpty(_email))
+                    {
+                        return _email;
+                    }
+                }
+            }
+            catch (Exception) { }
+
+            return null;
+        }
+
+        /// <summary>Estado local de las credenciales (sin red) y cuando vence el token de acceso.</summary>
+        public static ClaudeUsageStatus GetCredentialStatus(string credentialsPath, out string accessToken, out DateTime? expiresAt)
+        {
+            accessToken = null;
+            expiresAt = null;
+
+            try
+            {
+                if (string.IsNullOrEmpty(credentialsPath) || !File.Exists(credentialsPath))
+                {
+                    return ClaudeUsageStatus.NoCredentials;
+                }
+
+                JObject _oauth = (JObject)JObject.Parse(File.ReadAllText(credentialsPath))["claudeAiOauth"];
+
+                accessToken = (string)_oauth["accessToken"];
+
+                if (string.IsNullOrEmpty(accessToken))
+                {
+                    return ClaudeUsageStatus.NoCredentials;
+                }
+
+                long? _access = (long?)_oauth["expiresAt"];
+                long? _refresh = (long?)_oauth["refreshTokenExpiresAt"];
+
+                if (_access.HasValue)
+                {
+                    expiresAt = DateTimeOffset.FromUnixTimeMilliseconds(_access.Value).UtcDateTime;
+                }
+
+                // Refresh token vencido: Claude Code ya no puede renovar solo, hay que volver a hacer /login.
+                if (_refresh.HasValue && DateTimeOffset.FromUnixTimeMilliseconds(_refresh.Value) <= DateTimeOffset.UtcNow)
+                {
+                    return ClaudeUsageStatus.SessionExpired;
+                }
+
+                // Access token vencido: basta con abrir claude con esa cuenta para que lo renueve.
+                if (expiresAt.HasValue && expiresAt.Value <= DateTime.UtcNow)
+                {
+                    return ClaudeUsageStatus.TokenExpired;
+                }
+
+                return ClaudeUsageStatus.Ok;
+            }
+            catch (Exception)
+            {
+                return ClaudeUsageStatus.NoCredentials;
+            }
+        }
+
+        public static string DescribeStatus(string credentialsPath)
+        {
+            string _token;
+            DateTime? _expires;
+
+            switch (GetCredentialStatus(credentialsPath, out _token, out _expires))
+            {
+                case ClaudeUsageStatus.NoCredentials:
+                    return "Sin credenciales";
+
+                case ClaudeUsageStatus.SessionExpired:
+                    return "Sesion vencida: ejecuta /login con esta cuenta";
+
+                case ClaudeUsageStatus.TokenExpired:
+                    return "Token vencido: abre claude con esta cuenta para renovarlo";
+
+                default:
+                    if (!_expires.HasValue)
+                    {
+                        return "Token valido";
+                    }
+
+                    TimeSpan _left = _expires.Value - DateTime.UtcNow;
+
+                    return _left.TotalHours >= 1
+                        ? string.Format("Token valido, se renueva en {0}h {1:00}m", (int)_left.TotalHours, _left.Minutes)
+                        : string.Format("Token valido, se renueva en {0}m", Math.Max(1, _left.Minutes));
+            }
         }
 
         public static ClaudeAccount Add(string credentialsPath, string name)
@@ -155,6 +267,7 @@ namespace SidebarDiagnostics.Monitoring
         Ok,
         NoCredentials,
         TokenExpired,
+        SessionExpired,
         RateLimited,
         Error
     }
@@ -191,35 +304,15 @@ namespace SidebarDiagnostics.Monitoring
 
         public static async Task<ClaudeUsage> FetchAsync(string credentialsPath)
         {
+            // Se relee en cada consulta: Claude Code renueva el token en ese mismo archivo.
             string _token;
+            DateTime? _expiresAt;
 
-            try
+            ClaudeUsageStatus _status = ClaudeAccountStore.GetCredentialStatus(credentialsPath, out _token, out _expiresAt);
+
+            if (_status != ClaudeUsageStatus.Ok)
             {
-                if (string.IsNullOrEmpty(credentialsPath) || !File.Exists(credentialsPath))
-                {
-                    return new ClaudeUsage() { Status = ClaudeUsageStatus.NoCredentials };
-                }
-
-                // Se relee en cada consulta: Claude Code renueva el token en ese mismo archivo.
-                JObject _oauth = (JObject)JObject.Parse(File.ReadAllText(credentialsPath))["claudeAiOauth"];
-
-                _token = (string)_oauth["accessToken"];
-
-                long? _expiresAt = (long?)_oauth["expiresAt"];
-
-                if (string.IsNullOrEmpty(_token))
-                {
-                    return new ClaudeUsage() { Status = ClaudeUsageStatus.NoCredentials };
-                }
-
-                if (_expiresAt.HasValue && DateTimeOffset.FromUnixTimeMilliseconds(_expiresAt.Value) <= DateTimeOffset.UtcNow)
-                {
-                    return new ClaudeUsage() { Status = ClaudeUsageStatus.TokenExpired };
-                }
-            }
-            catch (Exception)
-            {
-                return new ClaudeUsage() { Status = ClaudeUsageStatus.NoCredentials };
+                return new ClaudeUsage() { Status = _status };
             }
 
             try
@@ -348,6 +441,14 @@ namespace SidebarDiagnostics.Monitoring
             Text = text;
         }
 
+        public void SetAlert(bool alert)
+        {
+            if (IsAlert != alert)
+            {
+                IsAlert = alert;
+            }
+        }
+
         public override bool IsNumeric
         {
             get { return _numeric; }
@@ -390,7 +491,22 @@ namespace SidebarDiagnostics.Monitoring
 
         public static IEnumerable<HardwareConfig> GetHardware()
         {
-            return ClaudeAccountStore.Load().Select(a => new HardwareConfig() { ID = a.ID, Name = a.Name, ActualName = a.Name });
+            return ClaudeAccountStore.Load().Select(a => new HardwareConfig()
+            {
+                ID = a.ID,
+                Name = a.Name,
+                ActualName = a.Name,
+                Info = DescribeAccount(a)
+            });
+        }
+
+        // Texto para la lista de cuentas en Ajustes: correo y estado del token.
+        private static string DescribeAccount(ClaudeAccount account)
+        {
+            string _email = ClaudeAccountStore.GetEmail(account.CredentialsPath);
+            string _status = ClaudeAccountStore.DescribeStatus(account.CredentialsPath);
+
+            return string.IsNullOrEmpty(_email) ? _status : string.Format("{0} - {1}", _email, _status);
         }
 
         public static iMonitor[] GetInstances(HardwareConfig[] hardwareConfig, MetricConfig[] metrics, ConfigParam[] parameters)
@@ -447,19 +563,25 @@ namespace SidebarDiagnostics.Monitoring
 
             if (usage.Status != ClaudeUsageStatus.Ok)
             {
-                // Se conserva el ultimo valor bueno; solo se avisa en la linea de reinicio o en el primer metric.
-                string _message = StatusText(usage.Status);
+                // Se conservan los ultimos valores buenos; el aviso va en la linea de reinicio
+                // (o en el primer metric si no esta activa), resaltado como alerta.
+                ClaudeMetric _target = _resetMetric ?? _session ?? _week;
 
-                if (_resetMetric != null)
+                if (_target != null)
                 {
-                    _resetMetric.SetText(_message);
-                }
-                else if (_session != null && !_hasData)
-                {
-                    _session.SetText(_message);
+                    _target.SetText(StatusText(usage.Status));
+                    _target.SetAlert(true);
                 }
 
                 return;
+            }
+
+            foreach (ClaudeMetric _metric in new ClaudeMetric[] { _session, _week, _resetMetric })
+            {
+                if (_metric != null)
+                {
+                    _metric.SetAlert(false);
+                }
             }
 
             _hasData = true;
@@ -516,7 +638,10 @@ namespace SidebarDiagnostics.Monitoring
                     return "sin credenciales";
 
                 case ClaudeUsageStatus.TokenExpired:
-                    return "token vencido";
+                    return "token vencido: abre claude";
+
+                case ClaudeUsageStatus.SessionExpired:
+                    return "sesion vencida: /login";
 
                 case ClaudeUsageStatus.RateLimited:
                     return "limitado (429)";

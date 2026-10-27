@@ -83,12 +83,19 @@ namespace SidebarDiagnostics
                 return;
             }
 
-            // El nombre sale de la carpeta de configuracion (.claude-trabajo -> claude-trabajo); se puede renombrar en la lista.
-            string _name = new System.IO.FileInfo(_dialog.FileName).Directory?.Name.TrimStart('.');
+            // El nombre por defecto es el correo de la cuenta; si no se encuentra, el de la carpeta
+            // (.claude-trabajo -> claude-trabajo). Se puede renombrar en la lista.
+            string _name = Monitoring.ClaudeAccountStore.GetEmail(_dialog.FileName) ?? new System.IO.FileInfo(_dialog.FileName).Directory?.Name.TrimStart('.');
 
             Monitoring.ClaudeAccount _account = Monitoring.ClaudeAccountStore.Add(_dialog.FileName, string.IsNullOrEmpty(_name) ? "Claude" : _name);
 
-            _config.HardwareOC.Add(new Monitoring.HardwareConfig() { ID = _account.ID, Name = _account.Name, ActualName = _account.Name });
+            _config.HardwareOC.Add(new Monitoring.HardwareConfig()
+            {
+                ID = _account.ID,
+                Name = _account.Name,
+                ActualName = _account.Name,
+                Info = Monitoring.ClaudeAccountStore.DescribeStatus(_account.CredentialsPath)
+            });
         }
 
         private void ClaudeRemoveAccount_Click(object sender, RoutedEventArgs e)

@@ -253,6 +253,13 @@
                                                             </DataTemplate>
                                                         </GridViewColumn.CellTemplate>
                                                     </GridViewColumn>
+                                                    <GridViewColumn Header="{x:Static frame:Resources.SettingsHardwareColumnInfo}" HeaderContainerStyle="{StaticResource MonitorHardwareHeader}" Width="330">
+                                                        <GridViewColumn.CellTemplate>
+                                                            <DataTemplate DataType="{x:Type monitor:HardwareConfig}">
+                                                                <TextBlock Text="{Binding Path=Info, Mode=OneWay}" ToolTip="{Binding Path=Info, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                                            </DataTemplate>
+                                                        </GridViewColumn.CellTemplate>
+                                                    </GridViewColumn>
                                                 </GridView>
                                             </ListView.View>
                                         </ListView>

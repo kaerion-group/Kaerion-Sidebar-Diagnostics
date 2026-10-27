@@ -102,7 +102,7 @@ namespace SidebarDiagnostics.Models
                     _record.HardwareOC = new ObservableCollection<HardwareConfig>(
                         from hw in sidebar.Model.MonitorManager.GetHardware(_record.Type)
                         join config in _record.Hardware on hw.ID equals config.ID into merged
-                        from newhw in merged.DefaultIfEmpty(hw).Select(newhw => { newhw.ActualName = hw.ActualName; if (string.IsNullOrEmpty(newhw.Name)) { newhw.Name = hw.ActualName; } return newhw; })
+                        from newhw in merged.DefaultIfEmpty(hw).Select(newhw => { newhw.ActualName = hw.ActualName; newhw.Info = hw.Info; if (string.IsNullOrEmpty(newhw.Name)) { newhw.Name = hw.ActualName; } return newhw; })
                         orderby newhw.Order descending, newhw.Name ascending
                         select newhw
                         );

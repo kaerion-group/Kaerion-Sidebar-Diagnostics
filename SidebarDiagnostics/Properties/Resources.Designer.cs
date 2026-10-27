@@ -772,6 +772,15 @@ namespace SidebarDiagnostics.Framework {
         }
 
         /// <summary>
+        ///   Looks up a localized string similar to Status.
+        /// </summary>
+        public static string SettingsHardwareColumnInfo {
+            get {
+                return ResourceManager.GetString("SettingsHardwareColumnInfo", resourceCulture);
+            }
+        }
+
+        /// <summary>
         ///   Looks up a localized string similar to Add account....
         /// </summary>
         public static string SettingsClaudeAddAccount {

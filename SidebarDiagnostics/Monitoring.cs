@@ -2125,7 +2125,7 @@ namespace SidebarDiagnostics.Monitoring
                             new MetricConfig(MetricKey.CPUVoltage, true),
                             new MetricConfig(MetricKey.CPUFan, true),
                             new MetricConfig(MetricKey.CPULoad, true),
-                            new MetricConfig(MetricKey.CPUCoreLoad, true)
+                            new MetricConfig(MetricKey.CPUCoreLoad, false)
                         },
                         Params = new ConfigParam[6]
                         {
@@ -2301,6 +2301,23 @@ namespace SidebarDiagnostics.Monitoring
                 _actualName = value;
 
                 NotifyPropertyChanged("ActualName");
+            }
+        }
+
+        private string _info { get; set; }
+
+        // Solo informativo para la lista de Ajustes (p. ej. estado del token de una cuenta); no se guarda.
+        public string Info
+        {
+            get
+            {
+                return _info;
+            }
+            set
+            {
+                _info = value;
+
+                NotifyPropertyChanged("Info");
             }
         }
 
