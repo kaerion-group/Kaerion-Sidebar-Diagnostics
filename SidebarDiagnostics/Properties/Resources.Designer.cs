@@ -853,6 +853,24 @@ namespace SidebarDiagnostics.Framework {
         }
 
         /// <summary>
+        ///   Looks up a localized string similar to Exhaustion estimate.
+        /// </summary>
+        public static string ClaudeEstimate {
+            get {
+                return ResourceManager.GetString("ClaudeEstimate", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Estimate.
+        /// </summary>
+        public static string ClaudeEstimateLabel {
+            get {
+                return ResourceManager.GetString("ClaudeEstimateLabel", resourceCulture);
+            }
+        }
+
+        /// <summary>
         ///   Looks up a localized string similar to Bandwidth In.
         /// </summary>
         public static string NetworkIn {

@@ -931,20 +931,21 @@ namespace SidebarDiagnostics.Monitoring
                 _text += " \u00B7 " + FormatSpan(_reset.Value - _now);
 
                 _exhaust = Projection(_now);
-
-                if (_exhaust.HasValue)
-                {
-                    _text += " \u00B7 \u26A0 " + FormatSpan(_exhaust.Value);
-                }
             }
+
+            Exhaust = _exhaust;
 
             if (Text != _text)
             {
                 Text = _text;
             }
 
-            Level = _percent.Value >= CRITICAL ? LEVELCRITICAL : (_percent.Value >= WARN || _exhaust.HasValue ? LEVELWARN : LEVELNORMAL);
+            // La proyeccion se muestra aparte, en la fila Estimate; aqui solo cuenta el consumo.
+            Level = _percent.Value >= CRITICAL ? LEVELCRITICAL : (_percent.Value >= WARN ? LEVELWARN : LEVELNORMAL);
         }
+
+        /// <summary>Tiempo hasta agotar la ventana al ritmo actual, si ocurre antes del reinicio; null si no.</summary>
+        public TimeSpan? Exhaust { get; private set; }
 
         public static string FormatSpan(TimeSpan span)
         {
@@ -1118,6 +1119,12 @@ namespace SidebarDiagnostics.Monitoring
             {
                 _week = new ClaudeMetric(MetricKey.ClaudeWeek, WEEK);
                 _metrics.Add(_week);
+            }
+
+            if (metrics.IsEnabled(MetricKey.ClaudeEstimate))
+            {
+                _estimate = new ClaudeMetric(MetricKey.ClaudeEstimate, WEEK);
+                _metrics.Add(_estimate);
             }
 
             Metrics = _metrics.ToArray();
@@ -1330,7 +1337,39 @@ namespace SidebarDiagnostics.Monitoring
             _session?.Refresh();
             _week?.Refresh();
 
+            ShowEstimate();
+
             IsStale = LastUsage?.FetchedAt != null && DateTime.UtcNow - LastUsage.FetchedAt.Value > STALE;
+        }
+
+        // Fila Estimate: la ventana que se agotaria primero al ritmo actual, antes de su reinicio.
+        private void ShowEstimate()
+        {
+            if (_estimate == null)
+            {
+                return;
+            }
+
+            if (LastUsage == null)
+            {
+                _estimate.SetText("...");
+                return;
+            }
+
+            TimeSpan? _sessionLeft = _session?.Exhaust;
+            TimeSpan? _weekLeft = _week?.Exhaust;
+
+            if (!_sessionLeft.HasValue && !_weekLeft.HasValue)
+            {
+                _estimate.SetText("ok");
+                return;
+            }
+
+            bool _weekFirst = !_sessionLeft.HasValue || (_weekLeft.HasValue && _weekLeft.Value < _sessionLeft.Value);
+
+            string _text = string.Format("{0} {1} ({2})", (char)0x26A0, ClaudeMetric.FormatSpan(_weekFirst ? _weekLeft.Value : _sessionLeft.Value), _weekFirst ? "7d" : "5h");
+
+            _estimate.SetText(_text, ClaudeMetric.LEVELWARN);
         }
 
         private async void Fetch()
@@ -1425,6 +1464,8 @@ namespace SidebarDiagnostics.Monitoring
 
         private ClaudeMetric _week { get; set; }
 
+        private ClaudeMetric _estimate { get; set; }
+
         private bool _busy { get; set; } = false;
 
         private DateTime _nextFetch { get; set; } = DateTime.MinValue;
@@ -1462,7 +1503,8 @@ namespace SidebarDiagnostics.Monitoring
             Show(_now, _accounts.Select(a => a.Remaining(true)).ToArray(), _total);
             Show(_week, _accounts.Select(a => a.Remaining(false)).ToArray(), _total);
 
-            IsStale = _accounts.Any(a => a.IsStale);
+            // Solo se atenua si ninguna cuenta tiene dato reciente; una cuenta vieja ya se ve atenuada en su fila.
+            IsStale = _accounts.Where(a => a.LastUsage != null).All(a => a.IsStale) && _accounts.Any(a => a.LastUsage != null);
 
             // Recomendada: la de mas capacidad libre ahora entre las que responden bien. Si es la
             // activa no se marca: lo que conviene es seguir con ella.

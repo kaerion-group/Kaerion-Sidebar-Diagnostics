@@ -1072,6 +1072,14 @@
     <value>7d</value>
     <comment>Short label for the Claude weekly usage metric</comment>
   </data>
+  <data name="ClaudeEstimate" xml:space="preserve">
+    <value>Exhaustion estimate</value>
+    <comment>Full name for the Claude metric that projects when a usage window runs out</comment>
+  </data>
+  <data name="ClaudeEstimateLabel" xml:space="preserve">
+    <value>Estimate</value>
+    <comment>Short label for the Claude exhaustion estimate metric</comment>
+  </data>
   <data name="SettingsShowMachineName" xml:space="preserve">
     <value>Show PC Name</value>
     <comment>Settings show machine name label</comment>
