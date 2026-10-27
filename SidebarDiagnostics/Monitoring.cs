@@ -2101,13 +2101,11 @@ namespace SidebarDiagnostics.Monitoring
                         Enabled = true,
                         Order = 6,
                         Hardware = new HardwareConfig[0],
-                        Metrics = new MetricConfig[5]
+                        Metrics = new MetricConfig[3]
                         {
                             new MetricConfig(MetricKey.ClaudeSession, true),
                             new MetricConfig(MetricKey.ClaudeWeek, true),
-                            new MetricConfig(MetricKey.ClaudeEstimate, true),
-                            new MetricConfig(MetricKey.ClaudeLeftover, true),
-                            new MetricConfig(MetricKey.ClaudePace, true)
+                            new MetricConfig(MetricKey.ClaudeAdvice, true)
                         },
                         Params = new ConfigParam[6]
                         {
@@ -2474,9 +2472,8 @@ namespace SidebarDiagnostics.Monitoring
         ClaudeSession = 28,
         ClaudeWeek = 29,
         // 30 era ClaudeReset: el reinicio ahora va junto a cada porcentaje.
-        ClaudeEstimate = 31,
-        ClaudeLeftover = 32,
-        ClaudePace = 33,
+        ClaudeAdvice = 31,
+        // 32 y 33 eran ClaudeLeftover y ClaudePace: ahora van en la fila de aviso.
 
         DriveLoadBar = 20,
         DriveLoad = 21,
@@ -3313,14 +3310,8 @@ namespace SidebarDiagnostics.Monitoring
                 case MetricKey.ClaudeWeek:
                     return Resources.ClaudeWeek;
 
-                case MetricKey.ClaudeEstimate:
-                    return Resources.ClaudeEstimate;
-
-                case MetricKey.ClaudeLeftover:
-                    return Resources.ClaudeLeftover;
-
-                case MetricKey.ClaudePace:
-                    return Resources.ClaudePace;
+                case MetricKey.ClaudeAdvice:
+                    return Resources.ClaudeAdvice;
 
                 default:
                     return "Unknown";
@@ -3421,14 +3412,8 @@ namespace SidebarDiagnostics.Monitoring
                 case MetricKey.ClaudeWeek:
                     return Resources.ClaudeWeekLabel;
 
-                case MetricKey.ClaudeEstimate:
-                    return Resources.ClaudeEstimateLabel;
-
-                case MetricKey.ClaudeLeftover:
-                    return Resources.ClaudeLeftoverLabel;
-
-                case MetricKey.ClaudePace:
-                    return Resources.ClaudePaceLabel;
+                case MetricKey.ClaudeAdvice:
+                    return Resources.ClaudeAdviceLabel;
 
                 default:
                     return "Unknown";

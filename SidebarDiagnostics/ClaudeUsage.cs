@@ -928,7 +928,7 @@ namespace SidebarDiagnostics.Monitoring
 
             DateTime _now = DateTime.UtcNow;
 
-            string _text = string.Format("{0}%", _percent.Value);
+            string _text = _percent.Value >= 100 ? "agotada" : string.Format("{0}%", _percent.Value);
 
             TimeSpan? _exhaust = null;
 
@@ -946,7 +946,7 @@ namespace SidebarDiagnostics.Monitoring
                 Text = _text;
             }
 
-            // La proyeccion se muestra aparte, en la fila Estimate; aqui solo cuenta el consumo.
+            // La proyeccion se muestra aparte, en la fila de aviso; aqui solo cuenta el consumo.
             Level = _percent.Value >= CRITICAL ? LEVELCRITICAL : (_percent.Value >= WARN ? LEVELWARN : LEVELNORMAL);
         }
 
@@ -1149,22 +1149,11 @@ namespace SidebarDiagnostics.Monitoring
                 _metrics.Add(_week);
             }
 
-            if (metrics.IsEnabled(MetricKey.ClaudeEstimate))
+            if (metrics.IsEnabled(MetricKey.ClaudeAdvice))
             {
-                _estimate = new ClaudeMetric(MetricKey.ClaudeEstimate, WEEK);
-                _metrics.Add(_estimate);
-            }
-
-            if (metrics.IsEnabled(MetricKey.ClaudeLeftover))
-            {
-                _leftover = new ClaudeMetric(MetricKey.ClaudeLeftover, WEEK);
-                _metrics.Add(_leftover);
-            }
-
-            if (metrics.IsEnabled(MetricKey.ClaudePace))
-            {
-                _pace = new ClaudeMetric(MetricKey.ClaudePace, WEEK);
-                _metrics.Add(_pace);
+                // Sin etiqueta: la fila solo aparece cuando hay algo que hacer.
+                _advice = new ClaudeMetric(MetricKey.ClaudeAdvice, WEEK, "");
+                _metrics.Add(_advice);
             }
 
             Metrics = _metrics.ToArray();
@@ -1530,86 +1519,47 @@ namespace SidebarDiagnostics.Monitoring
             _session?.Refresh();
             _week?.Refresh();
 
-            ShowEstimate();
-            ShowPlanning();
+            ShowAdvice();
 
             IsStale = LastUsage?.FetchedAt != null && DateTime.UtcNow - LastUsage.FetchedAt.Value > STALE;
         }
 
-        // Filas Sobra y Ritmo: lo que se perderia al reinicio al ritmo actual, y el ritmo que hace falta
-        // para llegar al 100 % justo antes (por dia, o por hora en el ultimo dia).
-        private void ShowPlanning()
+        // Fila de aviso, vacia (oculta) si no hay nada que hacer. Si al ritmo actual la ventana semanal se
+        // agota antes del reinicio, cuanto falta; si sobraria el 20 % o mas, cuanto y el ritmo diario (o
+        // por hora en el ultimo dia) que hace falta para gastarlo.
+        private void ShowAdvice()
         {
-            if (_leftover != null)
+            if (_advice == null)
             {
-                double? _percent = LeftoverPercent;
-
-                if (!_percent.HasValue)
-                {
-                    _leftover.SetText("...");
-                }
-                else
-                {
-                    _leftover.SetText(
-                        string.Format("~{0:0}%", _percent.Value),
-                        _percent.Value >= LEFTOVERWARN ? ClaudeMetric.LEVELWARN : ClaudeMetric.LEVELNORMAL
-                        );
-                }
-            }
-
-            if (_pace != null)
-            {
-                double? _needed = NeededPercentPerHour;
-                double? _hours = HoursToWeekReset;
-
-                if (!_needed.HasValue || !_hours.HasValue)
-                {
-                    _pace.SetText("...");
-                }
-                else if (_needed.Value <= 0)
-                {
-                    _pace.SetText("ok");
-                }
-                else
-                {
-                    double _current = Math.Max(0, _week?.Rate(DateTime.UtcNow) ?? 0);
-
-                    // En el ultimo dia se muestra por hora: "por dia" exageraria.
-                    bool _perDay = _hours.Value >= 24;
-                    double _factor = _perDay ? 24 : 1;
-                    string _unit = _perDay ? "%/d" : "%/h";
-
-                    _pace.SetText(
-                        string.Format("{0:0.#}{2} \u00B7 vas {1:0.#}{2}", _needed.Value * _factor, _current * _factor, _unit),
-                        _current < _needed.Value * 0.8 ? ClaudeMetric.LEVELWARN : ClaudeMetric.LEVELNORMAL
-                        );
-                }
-            }
-        }
-
-        // Fila Estimate: cuando se agotaria la ventana semanal al ritmo actual, si es antes de su reinicio.
-        private void ShowEstimate()
-        {
-            if (_estimate == null)
-            {
-                return;
-            }
-
-            if (LastUsage == null)
-            {
-                _estimate.SetText("...");
                 return;
             }
 
             TimeSpan? _weekLeft = _week?.Exhaust;
+            double? _leftover = LeftoverPercent;
+            double? _needed = NeededPercentPerHour;
+            double? _hours = HoursToWeekReset;
 
-            if (!_weekLeft.HasValue)
+            if (LastUsage == null || Status != ClaudeUsageStatus.Ok)
             {
-                _estimate.SetText("ok");
-                return;
+                _advice.SetText("");
             }
+            else if (_weekLeft.HasValue)
+            {
+                _advice.SetText(string.Format("{0} se agota en {1}", (char)0x26A0, ClaudeMetric.FormatSpan(_weekLeft.Value)), ClaudeMetric.LEVELWARN);
+            }
+            else if (_leftover.HasValue && _leftover.Value >= LEFTOVERWARN && _needed.HasValue && _hours.HasValue)
+            {
+                bool _perDay = _hours.Value >= 24;
 
-            _estimate.SetText(string.Format("{0} {1}", (char)0x26A0, ClaudeMetric.FormatSpan(_weekLeft.Value)), ClaudeMetric.LEVELWARN);
+                _advice.SetText(
+                    string.Format("sobra ~{0:0}% \u00B7 usa {1:0.#}{2}", _leftover.Value, _needed.Value * (_perDay ? 24 : 1), _perDay ? "%/d" : "%/h"),
+                    ClaudeMetric.LEVELWARN
+                    );
+            }
+            else
+            {
+                _advice.SetText("");
+            }
         }
 
         private async void Fetch()
@@ -1704,11 +1654,7 @@ namespace SidebarDiagnostics.Monitoring
 
         private ClaudeMetric _week { get; set; }
 
-        private ClaudeMetric _estimate { get; set; }
-
-        private ClaudeMetric _leftover { get; set; }
-
-        private ClaudeMetric _pace { get; set; }
+        private ClaudeMetric _advice { get; set; }
 
         private bool _busy { get; set; } = false;
 
@@ -1744,16 +1690,10 @@ namespace SidebarDiagnostics.Monitoring
             _metrics.Add(_now);
             _metrics.Add(_week);
 
-            if (metrics.IsEnabled(MetricKey.ClaudeEstimate))
+            if (metrics.IsEnabled(MetricKey.ClaudeAdvice))
             {
-                _estimate = new ClaudeMetric(MetricKey.ClaudeEstimate, WEEK);
-                _metrics.Add(_estimate);
-            }
-
-            if (metrics.IsEnabled(MetricKey.ClaudeLeftover))
-            {
-                _leftover = new ClaudeMetric(MetricKey.ClaudeLeftover, WEEK);
-                _metrics.Add(_leftover);
+                _end = new ClaudeMetric(MetricKey.ClaudeAdvice, WEEK);
+                _metrics.Add(_end);
             }
 
             Metrics = _metrics.ToArray();
@@ -1761,8 +1701,7 @@ namespace SidebarDiagnostics.Monitoring
 
         public override void Update()
         {
-            ShowEstimate();
-            ShowLeftover();
+            ShowEnd();
 
             AutoSwitch();
             NotifyLeftovers();
@@ -1814,31 +1753,6 @@ namespace SidebarDiagnostics.Monitoring
         private static bool ClearlyMoreUrgent(ClaudeMonitor candidate, ClaudeMonitor current)
         {
             return (candidate.NeededUnitsPerHour ?? 0) > (current.NeededUnitsPerHour ?? 0) * URGENCYMARGIN;
-        }
-
-        // Sobra del total: suma de lo que cada cuenta perderia en su reinicio al ritmo actual.
-        private void ShowLeftover()
-        {
-            if (_leftover == null)
-            {
-                return;
-            }
-
-            ClaudeMonitor[] _known = _accounts.Where(a => a.LeftoverUnits.HasValue).ToArray();
-
-            if (_known.Length == 0)
-            {
-                _leftover.SetText("...");
-                return;
-            }
-
-            double _units = _known.Sum(a => a.LeftoverUnits.Value);
-            double _total = _accounts.Sum(a => a.Weight);
-
-            _leftover.SetText(
-                string.Format("~{0:0.#} Pro", _units),
-                _total > 0 && 100 * _units / _total >= ClaudeMonitor.LEFTOVERWARN ? ClaudeMetric.LEVELWARN : ClaudeMetric.LEVELNORMAL
-                );
         }
 
         // Aviso de Windows (globo del icono de bandeja) unas horas antes del reinicio semanal de una cuenta
@@ -1905,12 +1819,12 @@ namespace SidebarDiagnostics.Monitoring
             metric.SetText(string.Format("{0}% \u00B7 {1:0.#} Pro", _percent, _units), _level);
         }
 
-        // Estimate del total: cuanto dura la capacidad semanal libre de todas las cuentas al ritmo de
-        // consumo combinado. Avisa si se acaba antes del proximo reinicio semanal de cualquier cuenta,
-        // que es cuando vuelve a haber capacidad.
-        private void ShowEstimate()
+        // Fila Fin del total: cuanto dura la capacidad semanal libre de todas las cuentas al ritmo de
+        // consumo combinado y cuanta se perderia en los reinicios (en unidades Pro). Avisa si se acaba
+        // antes del proximo reinicio semanal de cualquier cuenta, que es cuando vuelve a haber capacidad.
+        private void ShowEnd()
         {
-            if (_estimate == null)
+            if (_end == null)
             {
                 return;
             }
@@ -1919,16 +1833,20 @@ namespace SidebarDiagnostics.Monitoring
 
             if (_known.Length == 0)
             {
-                _estimate.SetText("...");
+                _end.SetText("...");
                 return;
             }
 
             double _rate = _known.Sum(a => a.WeekRate ?? 0);
             double _left = _known.Sum(a => a.Remaining(false) ?? 0);
+            double _leftover = _known.Sum(a => a.LeftoverUnits ?? 0);
+            double _total = _accounts.Sum(a => a.Weight);
+
+            string _sobra = string.Format("sobra {0:0.#}", _leftover);
 
             if (_rate <= 0)
             {
-                _estimate.SetText("ok");
+                _end.SetText("ok \u00B7 " + _sobra);
                 return;
             }
 
@@ -1937,10 +1855,11 @@ namespace SidebarDiagnostics.Monitoring
             DateTime? _nextReset = _known.Select(a => a.NextWeekReset).Where(r => r.HasValue).Min();
 
             bool _beforeReset = _nextReset.HasValue && DateTime.UtcNow + _toEmpty < _nextReset.Value;
+            bool _wasting = _total > 0 && 100 * _leftover / _total >= ClaudeMonitor.LEFTOVERWARN;
 
-            _estimate.SetText(
-                _beforeReset ? string.Format("{0} {1}", (char)0x26A0, ClaudeMetric.FormatSpan(_toEmpty)) : ClaudeMetric.FormatSpan(_toEmpty),
-                _beforeReset ? ClaudeMetric.LEVELWARN : ClaudeMetric.LEVELNORMAL
+            _end.SetText(
+                string.Format("{0}{1} \u00B7 {2}", _beforeReset ? (char)0x26A0 + " " : "", ClaudeMetric.FormatSpan(_toEmpty), _sobra),
+                _beforeReset || _wasting ? ClaudeMetric.LEVELWARN : ClaudeMetric.LEVELNORMAL
                 );
         }
 
@@ -2010,9 +1929,7 @@ namespace SidebarDiagnostics.Monitoring
 
         private ClaudeMetric _week { get; set; }
 
-        private ClaudeMetric _estimate { get; set; }
-
-        private ClaudeMetric _leftover { get; set; }
+        private ClaudeMetric _end { get; set; }
 
         private bool _autoSwitch { get; set; }
 

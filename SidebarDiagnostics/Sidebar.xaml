@@ -219,8 +219,27 @@
                                                         </ItemsControl.Style>
                                                         <ItemsControl.ItemTemplate>
                                                             <DataTemplate DataType="{x:Type monitor:ClaudeMetric}">
-                                                                <DockPanel Style="{StaticResource MetricPanel}">
-                                                                    <TextBlock Text="{Binding Path=Label, Mode=OneWay, Converter={StaticResource MetricLabelConverter}}" Style="{StaticResource MetricLabel}" />
+                                                                <DockPanel>
+                                                                    <DockPanel.Style>
+                                                                        <Style TargetType="{x:Type DockPanel}" BasedOn="{StaticResource MetricPanel}">
+                                                                            <Style.Triggers>
+                                                                                <DataTrigger Binding="{Binding Path=Text, Mode=OneWay}" Value="">
+                                                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                                                </DataTrigger>
+                                                                            </Style.Triggers>
+                                                                        </Style>
+                                                                    </DockPanel.Style>
+                                                                    <TextBlock Text="{Binding Path=Label, Mode=OneWay, Converter={StaticResource MetricLabelConverter}}">
+                                                                        <TextBlock.Style>
+                                                                            <Style TargetType="{x:Type TextBlock}" BasedOn="{StaticResource MetricLabel}">
+                                                                                <Style.Triggers>
+                                                                                    <DataTrigger Binding="{Binding Path=Label, Mode=OneWay}" Value="">
+                                                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                                                    </DataTrigger>
+                                                                                </Style.Triggers>
+                                                                            </Style>
+                                                                        </TextBlock.Style>
+                                                                    </TextBlock>
                                                                     <TextBlock Text="{Binding Path=Text, Mode=OneWay}">
                                                                         <TextBlock.Style>
                                                                             <Style TargetType="{x:Type TextBlock}" BasedOn="{StaticResource MetricValue}">

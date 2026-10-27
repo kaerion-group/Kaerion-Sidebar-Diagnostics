@@ -876,30 +876,6 @@ namespace SidebarDiagnostics.Framework {
             }
         }
 
-        public static string ClaudeLeftover {
-            get {
-                return ResourceManager.GetString("ClaudeLeftover", resourceCulture);
-            }
-        }
-
-        public static string ClaudeLeftoverLabel {
-            get {
-                return ResourceManager.GetString("ClaudeLeftoverLabel", resourceCulture);
-            }
-        }
-
-        public static string ClaudePace {
-            get {
-                return ResourceManager.GetString("ClaudePace", resourceCulture);
-            }
-        }
-
-        public static string ClaudePaceLabel {
-            get {
-                return ResourceManager.GetString("ClaudePaceLabel", resourceCulture);
-            }
-        }
-
         public static string SettingsClaudeAutoSwitch {
             get {
                 return ResourceManager.GetString("SettingsClaudeAutoSwitch", resourceCulture);
@@ -937,20 +913,20 @@ namespace SidebarDiagnostics.Framework {
         }
 
         /// <summary>
-        ///   Looks up a localized string similar to Exhaustion estimate.
+        ///   Looks up a localized string similar to Warnings (runs out or left over).
         /// </summary>
-        public static string ClaudeEstimate {
+        public static string ClaudeAdvice {
             get {
-                return ResourceManager.GetString("ClaudeEstimate", resourceCulture);
+                return ResourceManager.GetString("ClaudeAdvice", resourceCulture);
             }
         }
 
         /// <summary>
-        ///   Looks up a localized string similar to Estimate.
+        ///   Looks up a localized string similar to Fin.
         /// </summary>
-        public static string ClaudeEstimateLabel {
+        public static string ClaudeAdviceLabel {
             get {
-                return ResourceManager.GetString("ClaudeEstimateLabel", resourceCulture);
+                return ResourceManager.GetString("ClaudeAdviceLabel", resourceCulture);
             }
         }
 
