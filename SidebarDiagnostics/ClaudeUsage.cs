@@ -7,6 +7,7 @@ using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -248,7 +249,9 @@ namespace SidebarDiagnostics.Monitoring
 
                 if (_swap.Usage.Status != ClaudeUsageStatus.Ok)
                 {
-                    _parts.Add("sin datos de uso");
+                    _parts.Add(_swap.TokenExpired
+                        ? string.Format("token vencido: ejecuta claude-swap run {0} para renovarlo", _swap.Number)
+                        : "sin datos de uso");
                 }
                 else if (_swap.FetchedAt.HasValue)
                 {
@@ -339,6 +342,8 @@ namespace SidebarDiagnostics.Monitoring
 
         public DateTime? FetchedAt { get; set; }
 
+        public bool TokenExpired { get; set; }
+
         public ClaudeUsage Usage { get; set; }
     }
 
@@ -407,7 +412,8 @@ namespace SidebarDiagnostics.Monitoring
 
                 _cachedAt = DateTime.UtcNow;
 
-                string _json = Run("list --json");
+                string _errors;
+                string _json = Run("list --json", out _errors);
 
                 _lastOk = _json != null;
 
@@ -416,6 +422,11 @@ namespace SidebarDiagnostics.Monitoring
                     try
                     {
                         _cache = Parse(JObject.Parse(_json));
+
+                        if (_cache.Any(a => a.Usage.Status == ClaudeUsageStatus.Unavailable))
+                        {
+                            MarkExpiredTokens(_cache);
+                        }
                     }
                     catch (Exception)
                     {
@@ -427,8 +438,71 @@ namespace SidebarDiagnostics.Monitoring
             }
         }
 
-        private static string Run(string arguments)
+        /// <summary>Descarta la ultima lectura para que la proxima consulta vuelva a llamar a claude-swap.</summary>
+        public static void Invalidate()
         {
+            lock (_lock)
+            {
+                _cachedAt = DateTime.MinValue;
+            }
+        }
+
+        /// <summary>Activa otra cuenta con "claude-swap switch"; devuelve el error o null si funciono.</summary>
+        public static string Switch(string email)
+        {
+            if (ExePath == null)
+            {
+                return "No se encontro claude-swap.";
+            }
+
+            string _errors;
+            string _output = Run("switch " + email, out _errors);
+
+            Invalidate();
+
+            return _output != null ? null : (string.IsNullOrWhiteSpace(_errors) ? "claude-swap no pudo cambiar de cuenta." : _errors.Trim());
+        }
+
+        // "--token-status" no se puede combinar con "--json": se lee la salida de texto, donde cada
+        // cuenta empieza con "N: correo" y su token aparece en una linea "oauth: expired".
+        private static void MarkExpiredTokens(ClaudeSwapAccount[] accounts)
+        {
+            string _errors;
+            string _text = Run("list --token-status", out _errors);
+
+            if (_text == null)
+            {
+                return;
+            }
+
+            ClaudeSwapAccount _current = null;
+
+            foreach (string _line in _text.Split('\n'))
+            {
+                Match _account = Regex.Match(_line, @"^\s*(\d+):\s+(\S+@\S+)");
+
+                if (_account.Success)
+                {
+                    _current = accounts.FirstOrDefault(a => string.Equals(a.Email, _account.Groups[2].Value, StringComparison.OrdinalIgnoreCase));
+                    continue;
+                }
+
+                if (_current != null && Regex.IsMatch(_line, @"oauth:\s*expired", RegexOptions.IgnoreCase))
+                {
+                    _current.TokenExpired = true;
+
+                    if (_current.Usage.Status == ClaudeUsageStatus.Unavailable)
+                    {
+                        _current.Usage.Status = ClaudeUsageStatus.TokenExpired;
+                    }
+                }
+            }
+        }
+
+        private static string Run(string arguments, out string errors)
+        {
+            errors = null;
+
             string _exe = ExePath;
 
             if (_exe == null)
@@ -461,6 +535,8 @@ namespace SidebarDiagnostics.Monitoring
                         return null;
                     }
 
+                    errors = _errors.Result;
+
                     return _process.ExitCode == 0 ? _output.Result : null;
                 }
             }
@@ -483,7 +559,12 @@ namespace SidebarDiagnostics.Monitoring
             {
                 JObject _usage = a["usage"] as JObject;
 
-                ClaudeUsage _result = new ClaudeUsage();
+                ClaudeUsage _result = new ClaudeUsage()
+                {
+                    FetchedAt = ClaudeUsageClient.ParseDate(a["usageFetchedAt"]),
+                    Active = (bool?)a["active"] ?? false,
+                    SwapNumber = (int?)a["number"] ?? 0
+                };
 
                 if ((string)a["usageStatus"] != "ok" || _usage == null)
                 {
@@ -532,6 +613,15 @@ namespace SidebarDiagnostics.Monitoring
         public double? WeekPercent { get; set; }
 
         public DateTime? WeekReset { get; set; }
+
+        /// <summary>Momento en que se obtuvo el dato (consulta directa o cache de claude-swap).</summary>
+        public DateTime? FetchedAt { get; set; }
+
+        /// <summary>Cuenta activa en claude-swap.</summary>
+        public bool Active { get; set; }
+
+        /// <summary>Numero de la cuenta en claude-swap; 0 si no viene de ahi.</summary>
+        public int SwapNumber { get; set; }
     }
 
     public static class ClaudeUsageClient
@@ -586,6 +676,9 @@ namespace SidebarDiagnostics.Monitoring
             if (_swap.Active && string.Equals(ClaudeAccountStore.GetEmail(_default), _swap.Email, StringComparison.OrdinalIgnoreCase))
             {
                 ClaudeUsage _direct = await FetchAsync(_default).ConfigureAwait(false);
+
+                _direct.Active = true;
+                _direct.SwapNumber = _swap.Number;
 
                 if (_direct.Status == ClaudeUsageStatus.Ok || _swap.Usage.Status != ClaudeUsageStatus.Ok)
                 {
@@ -669,6 +762,7 @@ namespace SidebarDiagnostics.Monitoring
             _usage.SessionReset = _sReset;
             _usage.WeekPercent = _wPct;
             _usage.WeekReset = _wReset;
+            _usage.FetchedAt = DateTime.UtcNow;
 
             return _usage;
         }
@@ -727,33 +821,87 @@ namespace SidebarDiagnostics.Monitoring
         }
     }
 
-    /// <summary>Porcentaje de una ventana de uso con la cuenta atras de su reinicio en la misma linea.</summary>
+    /// <summary>
+    /// Peso de una cuenta segun el plan escrito entre parentesis en su nombre:
+    /// "(Pro)" = 1, "(X5)" o "(Max5)" = 5, "(X20)" = 20, "(Max)" = 5. Sin etiqueta cuenta como Pro.
+    /// </summary>
+    public static class ClaudePlan
+    {
+        private static readonly Regex _tag = new Regex(@"\((?:pro|(?:max\s*)?x\s*(\d+)|max\s*(\d+)?)\)", RegexOptions.IgnoreCase);
+
+        public static double Weight(string name)
+        {
+            Match _match = _tag.Match(name ?? "");
+
+            if (!_match.Success)
+            {
+                return 1;
+            }
+
+            if (_match.Groups[1].Success)
+            {
+                return Math.Max(1, int.Parse(_match.Groups[1].Value));
+            }
+
+            if (_match.Value.IndexOf("max", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return _match.Groups[2].Success ? Math.Max(1, int.Parse(_match.Groups[2].Value)) : 5;
+            }
+
+            return 1;
+        }
+    }
+
+    /// <summary>
+    /// Porcentaje de una ventana de uso con la cuenta atras de su reinicio en la misma linea y, si al
+    /// ritmo actual se agota antes del reinicio, el tiempo que le queda.
+    /// </summary>
     public class ClaudeMetric : BaseMetric
     {
-        public ClaudeMetric(MetricKey key) : base(key, DataType.Percent)
+        public const byte LEVELNORMAL = 0;
+        public const byte LEVELWARN = 1;
+        public const byte LEVELCRITICAL = 2;
+
+        private const double WARN = 75;
+        private const double CRITICAL = 90;
+
+        private static readonly TimeSpan MINSPAN = TimeSpan.FromMinutes(20);
+        private static readonly TimeSpan MAXLOOKBACK = TimeSpan.FromHours(6);
+
+        public ClaudeMetric(MetricKey key, TimeSpan window, string label = null) : base(key, DataType.Percent, label)
         {
+            _window = window;
+
             Text = "...";
         }
 
-        public void SetUsage(double? percent, DateTime? reset)
+        public void SetUsage(double? percent, DateTime? reset, DateTime? fetchedAt)
         {
             if (percent.HasValue)
             {
                 _percent = Math.Round(percent.Value);
                 Value = nValue = _percent.Value;
+
+                AddSample(fetchedAt ?? DateTime.UtcNow, percent.Value);
             }
 
             _reset = reset;
-            _showStatus = false;
+            _fixedText = false;
 
             Refresh();
         }
 
-        public void SetStatus(string text)
+        /// <summary>Texto fijo (un aviso o el total), sin cuenta atras.</summary>
+        public void SetText(string text, byte level = LEVELNORMAL)
         {
-            _showStatus = true;
+            _fixedText = true;
 
-            Text = text;
+            if (Text != text)
+            {
+                Text = text;
+            }
+
+            Level = level;
         }
 
         public void SetAlert(bool alert)
@@ -764,25 +912,38 @@ namespace SidebarDiagnostics.Monitoring
             }
         }
 
-        /// <summary>Recalcula la cuenta atras; se llama en cada actualizacion del sidebar.</summary>
+        /// <summary>Recalcula la cuenta atras y la proyeccion; se llama en cada actualizacion del sidebar.</summary>
         public void Refresh()
         {
-            if (_showStatus || !_percent.HasValue)
+            if (_fixedText || !_percent.HasValue)
             {
                 return;
             }
 
+            DateTime _now = DateTime.UtcNow;
+
             string _text = string.Format("{0}%", _percent.Value);
+
+            TimeSpan? _exhaust = null;
 
             if (_reset.HasValue)
             {
-                _text += " \u00B7 " + FormatSpan(_reset.Value - DateTime.UtcNow);
+                _text += " \u00B7 " + FormatSpan(_reset.Value - _now);
+
+                _exhaust = Projection(_now);
+
+                if (_exhaust.HasValue)
+                {
+                    _text += " \u00B7 \u26A0 " + FormatSpan(_exhaust.Value);
+                }
             }
 
             if (Text != _text)
             {
                 Text = _text;
             }
+
+            Level = _percent.Value >= CRITICAL ? LEVELCRITICAL : (_percent.Value >= WARN || _exhaust.HasValue ? LEVELWARN : LEVELNORMAL);
         }
 
         public static string FormatSpan(TimeSpan span)
@@ -805,17 +966,138 @@ namespace SidebarDiagnostics.Monitoring
             return string.Format("{0}m", Math.Max(1, span.Minutes));
         }
 
+        private void AddSample(DateTime time, double percent)
+        {
+            if (_samples.Count > 0 && _samples[_samples.Count - 1].Key >= time)
+            {
+                return;
+            }
+
+            _samples.Add(new KeyValuePair<DateTime, double>(time, percent));
+
+            _samples.RemoveAll(s => s.Key < time - _window);
+        }
+
+        // Tiempo hasta el 100 % al ritmo actual, solo si llega antes del reinicio. El ritmo sale de las
+        // lecturas recientes (la ultima hora en la ventana de 5h, las ultimas 6h en la semanal); si aun
+        // no cubren 20 min, del promedio desde que empezo la ventana.
+        private TimeSpan? Projection(DateTime now)
+        {
+            if (!_reset.HasValue || !_percent.HasValue || _percent.Value >= 100 || _reset.Value <= now)
+            {
+                return null;
+            }
+
+            DateTime _start = _reset.Value - _window;
+            DateTime _since = now - TimeSpan.FromTicks(Math.Min(_window.Ticks / 5, MAXLOOKBACK.Ticks));
+
+            KeyValuePair<DateTime, double>[] _recent = _samples.Where(s => s.Key > _start && s.Key >= _since).ToArray();
+
+            double? _rate = null;
+
+            if (_recent.Length >= 2)
+            {
+                KeyValuePair<DateTime, double> _first = _recent[0];
+                KeyValuePair<DateTime, double> _last = _recent[_recent.Length - 1];
+
+                if (_last.Key - _first.Key >= MINSPAN && _last.Value >= _first.Value)
+                {
+                    _rate = (_last.Value - _first.Value) / (_last.Key - _first.Key).TotalHours;
+                }
+            }
+
+            if (!_rate.HasValue && now - _start >= MINSPAN)
+            {
+                _rate = _percent.Value / (now - _start).TotalHours;
+            }
+
+            if (!_rate.HasValue || _rate.Value <= 0)
+            {
+                return null;
+            }
+
+            TimeSpan _toFull = TimeSpan.FromHours((100 - _percent.Value) / _rate.Value);
+
+            return now + _toFull < _reset.Value ? _toFull : (TimeSpan?)null;
+        }
+
+        private byte _level { get; set; } = LEVELNORMAL;
+
+        /// <summary>0 normal, 1 aviso (75 % o se agota antes del reinicio), 2 critico (90 %).</summary>
+        public byte Level
+        {
+            get
+            {
+                return _level;
+            }
+            private set
+            {
+                if (_level != value)
+                {
+                    _level = value;
+
+                    NotifyPropertyChanged("Level");
+                }
+            }
+        }
+
+        private TimeSpan _window { get; set; }
+
         private double? _percent { get; set; }
 
         private DateTime? _reset { get; set; }
 
-        private bool _showStatus { get; set; } = false;
+        private bool _fixedText { get; set; } = false;
+
+        private List<KeyValuePair<DateTime, double>> _samples { get; set; } = new List<KeyValuePair<DateTime, double>>();
     }
 
-    public class ClaudeMonitor : BaseMonitor
+    /// <summary>Base comun de las filas de Claude en el sidebar (cuentas y total).</summary>
+    public abstract class ClaudeBaseMonitor : BaseMonitor
+    {
+        protected static readonly TimeSpan SESSION = TimeSpan.FromHours(5);
+        protected static readonly TimeSpan WEEK = TimeSpan.FromDays(7);
+
+        protected ClaudeBaseMonitor(string id, string name, bool showName) : base(id, name, showName) { }
+
+        public virtual bool IsAccount
+        {
+            get { return false; }
+        }
+
+        public virtual bool CanSwitch
+        {
+            get { return false; }
+        }
+
+        private bool _isStale { get; set; } = false;
+
+        /// <summary>El dato mostrado tiene mas de 10 minutos.</summary>
+        public bool IsStale
+        {
+            get
+            {
+                return _isStale;
+            }
+            protected set
+            {
+                if (_isStale != value)
+                {
+                    _isStale = value;
+
+                    NotifyPropertyChanged("IsStale");
+                }
+            }
+        }
+    }
+
+    public class ClaudeMonitor : ClaudeBaseMonitor
     {
         private static readonly TimeSpan REFRESH = TimeSpan.FromMinutes(2);
         private static readonly TimeSpan BACKOFF = TimeSpan.FromMinutes(5);
+        private static readonly TimeSpan STALE = TimeSpan.FromMinutes(10);
+
+        private static DateTime _refreshRequested = DateTime.MinValue;
 
         public ClaudeMonitor(ClaudeAccount account, string alias, MetricConfig[] metrics, bool showName = true) : base(account.ID, string.IsNullOrEmpty(alias) ? account.Name : alias, showName)
         {
@@ -828,13 +1110,13 @@ namespace SidebarDiagnostics.Monitoring
 
             if (metrics.IsEnabled(MetricKey.ClaudeSession))
             {
-                _session = new ClaudeMetric(MetricKey.ClaudeSession);
+                _session = new ClaudeMetric(MetricKey.ClaudeSession, SESSION);
                 _metrics.Add(_session);
             }
 
             if (metrics.IsEnabled(MetricKey.ClaudeWeek))
             {
-                _week = new ClaudeMetric(MetricKey.ClaudeWeek);
+                _week = new ClaudeMetric(MetricKey.ClaudeWeek, WEEK);
                 _metrics.Add(_week);
             }
 
@@ -858,7 +1140,7 @@ namespace SidebarDiagnostics.Monitoring
 
             ClaudeAccount[] _accounts = ClaudeAccountStore.Load();
 
-            return (
+            ClaudeMonitor[] _monitors = (
                 from acc in _accounts
                 join c in hardwareConfig on acc.ID equals c.ID into merged
                 from n in merged.DefaultIfEmpty(new HardwareConfig() { ID = acc.ID, Name = null, ActualName = acc.Name })
@@ -866,6 +1148,34 @@ namespace SidebarDiagnostics.Monitoring
                 orderby n.Order descending, (string.IsNullOrEmpty(n.Name) ? acc.Name : n.Name) ascending
                 select new ClaudeMonitor(acc, string.Equals(n.Name, acc.Name, StringComparison.Ordinal) ? null : n.Name, metrics, _showName)
                 ).ToArray();
+
+            if (_monitors.Length < 2)
+            {
+                return _monitors;
+            }
+
+            return new iMonitor[] { new ClaudeTotalMonitor(_monitors, _showName) }.Concat(_monitors).ToArray();
+        }
+
+        /// <summary>Hace que todas las cuentas vuelvan a consultar en la proxima actualizacion.</summary>
+        public static void RequestRefresh()
+        {
+            _refreshRequested = DateTime.UtcNow;
+        }
+
+        public override bool IsAccount
+        {
+            get { return true; }
+        }
+
+        public override bool CanSwitch
+        {
+            get { return _account.IsSwap && !IsActive; }
+        }
+
+        public string SwapEmail
+        {
+            get { return _account.SwapEmail; }
         }
 
         /// <summary>Correo (o alias de claude-swap) de la cuenta, usado cuando no hay pseudonimo.</summary>
@@ -873,6 +1183,101 @@ namespace SidebarDiagnostics.Monitoring
 
         /// <summary>Pseudonimo puesto en el sidebar o en Ajustes; null si no hay.</summary>
         public string Alias { get; private set; }
+
+        /// <summary>Nombre sin las marcas de activa o recomendada.</summary>
+        public string BaseName
+        {
+            get { return Alias ?? DefaultName; }
+        }
+
+        /// <summary>Peso del plan de la cuenta (Pro = 1), segun la etiqueta de su nombre.</summary>
+        public double Weight
+        {
+            get { return ClaudePlan.Weight(BaseName); }
+        }
+
+        /// <summary>Ultimo dato de uso valido; null si aun no hay.</summary>
+        public ClaudeUsage LastUsage { get; private set; }
+
+        public ClaudeUsageStatus Status { get; private set; } = ClaudeUsageStatus.Ok;
+
+        private bool _isActive { get; set; } = false;
+
+        public bool IsActive
+        {
+            get
+            {
+                return _isActive;
+            }
+            private set
+            {
+                if (_isActive != value)
+                {
+                    _isActive = value;
+
+                    NotifyPropertyChanged("IsActive");
+                    NotifyPropertyChanged("CanSwitch");
+
+                    UpdateName();
+                }
+            }
+        }
+
+        private bool _isRecommended { get; set; } = false;
+
+        /// <summary>La cuenta con mas capacidad libre ahora; lo decide la fila del total.</summary>
+        public bool IsRecommended
+        {
+            get
+            {
+                return _isRecommended;
+            }
+            set
+            {
+                if (_isRecommended != value)
+                {
+                    _isRecommended = value;
+
+                    NotifyPropertyChanged("IsRecommended");
+
+                    UpdateName();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Capacidad libre en unidades de plan (Pro = 1); null sin datos. Con now = true se limita
+        /// tambien por la ventana de 5 horas, que es lo que se puede usar en este momento.
+        /// </summary>
+        public double? Remaining(bool now)
+        {
+            if (LastUsage == null)
+            {
+                return null;
+            }
+
+            DateTime _utc = DateTime.UtcNow;
+
+            double _left = Left(LastUsage.WeekPercent, LastUsage.WeekReset, _utc);
+
+            if (now)
+            {
+                _left = Math.Min(_left, Left(LastUsage.SessionPercent, LastUsage.SessionReset, _utc));
+            }
+
+            return Weight * _left / 100;
+        }
+
+        // Si la ventana ya se reinicio desde la ultima lectura, vuelve a estar libre.
+        private static double Left(double? percent, DateTime? reset, DateTime now)
+        {
+            if (reset.HasValue && reset.Value <= now)
+            {
+                return 100;
+            }
+
+            return Math.Max(0, 100 - (percent ?? 0));
+        }
 
         /// <summary>Cambia el pseudonimo y lo guarda en la configuracion del monitor (nombre del hardware).</summary>
         public void SetAlias(string alias)
@@ -901,20 +1306,31 @@ namespace SidebarDiagnostics.Monitoring
             }
 
             Alias = alias;
-            Name = alias ?? DefaultName;
+
+            UpdateName();
+        }
+
+        private void UpdateName()
+        {
+            string _prefix = IsActive ? "\u25CF " : (IsRecommended ? "\u2192 " : "");
+
+            Name = _prefix + BaseName;
         }
 
         public override void Update()
         {
-            if (!_busy && DateTime.UtcNow >= _nextFetch)
+            if (!_busy && (DateTime.UtcNow >= _nextFetch || _refreshRequested > _fetchStarted))
             {
                 _busy = true;
+                _fetchStarted = DateTime.UtcNow;
 
                 Fetch();
             }
 
             _session?.Refresh();
             _week?.Refresh();
+
+            IsStale = LastUsage?.FetchedAt != null && DateTime.UtcNow - LastUsage.FetchedAt.Value > STALE;
         }
 
         private async void Fetch()
@@ -939,6 +1355,13 @@ namespace SidebarDiagnostics.Monitoring
 
         private void Apply(ClaudeUsage usage)
         {
+            Status = usage.Status;
+
+            if (_account.IsSwap && usage.SwapNumber > 0)
+            {
+                IsActive = usage.Active;
+            }
+
             if (usage.Status != ClaudeUsageStatus.Ok)
             {
                 // Se conservan los ultimos valores buenos de la semana; el aviso va en la primera
@@ -947,35 +1370,40 @@ namespace SidebarDiagnostics.Monitoring
 
                 if (_target != null)
                 {
-                    _target.SetStatus(StatusText(usage.Status));
+                    _target.SetText(StatusText(usage));
                     _target.SetAlert(true);
                 }
 
                 return;
             }
 
+            LastUsage = usage;
+
             if (_session != null)
             {
                 _session.SetAlert(false);
-                _session.SetUsage(usage.SessionPercent, usage.SessionReset);
+                _session.SetUsage(usage.SessionPercent, usage.SessionReset, usage.FetchedAt);
             }
 
             if (_week != null)
             {
                 _week.SetAlert(false);
-                _week.SetUsage(usage.WeekPercent, usage.WeekReset);
+                _week.SetUsage(usage.WeekPercent, usage.WeekReset, usage.FetchedAt);
             }
         }
 
-        private static string StatusText(ClaudeUsageStatus status)
+        private static string StatusText(ClaudeUsage usage)
         {
-            switch (status)
+            switch (usage.Status)
             {
                 case ClaudeUsageStatus.NoCredentials:
                     return "sin credenciales";
 
                 case ClaudeUsageStatus.TokenExpired:
-                    return "token vencido: abre claude";
+                    // Una cuenta inactiva de claude-swap se renueva con "claude-swap run N".
+                    return usage.SwapNumber > 0 && !usage.Active
+                        ? string.Format("token vencido: run {0}", usage.SwapNumber)
+                        : "token vencido: abre claude";
 
                 case ClaudeUsageStatus.SessionExpired:
                     return "sesion vencida: /login";
@@ -1000,6 +1428,77 @@ namespace SidebarDiagnostics.Monitoring
         private bool _busy { get; set; } = false;
 
         private DateTime _nextFetch { get; set; } = DateTime.MinValue;
+
+        private DateTime _fetchStarted { get; set; } = DateTime.MinValue;
+    }
+
+    /// <summary>
+    /// Capacidad libre de las cuentas visibles, ponderada por plan (Pro = 1), y cual conviene usar.
+    /// "Ahora" limita cada cuenta tambien por su ventana de 5 horas; "7d" solo por la semanal.
+    /// </summary>
+    public class ClaudeTotalMonitor : ClaudeBaseMonitor
+    {
+        public ClaudeTotalMonitor(ClaudeMonitor[] accounts, bool showName) : base("claude-total", "Total", showName)
+        {
+            _accounts = accounts;
+
+            _now = new ClaudeMetric(MetricKey.ClaudeSession, SESSION, "Ahora");
+            _week = new ClaudeMetric(MetricKey.ClaudeWeek, WEEK, "7d");
+
+            Metrics = new iMetric[] { _now, _week };
+        }
+
+        public override void Update()
+        {
+            double _total = _accounts.Sum(a => a.Weight);
+
+            string _name = string.Format("Total ({0:0.#} Pro)", _total);
+
+            if (Name != _name)
+            {
+                Name = _name;
+            }
+
+            Show(_now, _accounts.Select(a => a.Remaining(true)).ToArray(), _total);
+            Show(_week, _accounts.Select(a => a.Remaining(false)).ToArray(), _total);
+
+            IsStale = _accounts.Any(a => a.IsStale);
+
+            // Recomendada: la de mas capacidad libre ahora entre las que responden bien. Si es la
+            // activa no se marca: lo que conviene es seguir con ella.
+            ClaudeMonitor _best = _accounts
+                .Where(a => a.Status == ClaudeUsageStatus.Ok && (a.Remaining(true) ?? 0) > 0)
+                .OrderByDescending(a => a.Remaining(true))
+                .FirstOrDefault();
+
+            foreach (ClaudeMonitor _account in _accounts)
+            {
+                _account.IsRecommended = _account == _best && !_account.IsActive;
+            }
+        }
+
+        // Las cuentas sin datos cuentan como agotadas: el total nunca promete capacidad que no se ve.
+        private static void Show(ClaudeMetric metric, double?[] remaining, double total)
+        {
+            if (total <= 0 || remaining.All(r => !r.HasValue))
+            {
+                metric.SetText("...");
+                return;
+            }
+
+            double _units = remaining.Sum(r => r ?? 0);
+            double _percent = Math.Round(100 * _units / total);
+
+            byte _level = _percent <= 10 ? ClaudeMetric.LEVELCRITICAL : (_percent <= 25 ? ClaudeMetric.LEVELWARN : ClaudeMetric.LEVELNORMAL);
+
+            metric.SetText(string.Format("{0}% \u00B7 {1:0.#} Pro", _percent, _units), _level);
+        }
+
+        private ClaudeMonitor[] _accounts { get; set; }
+
+        private ClaudeMetric _now { get; set; }
+
+        private ClaudeMetric _week { get; set; }
     }
 
     /// <summary>Ventana minima para escribir el pseudonimo de una cuenta.</summary>

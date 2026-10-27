@@ -251,6 +251,41 @@ namespace SidebarDiagnostics
         {
             ((sender as FrameworkElement)?.DataContext as Monitoring.ClaudeMonitor)?.SetAlias(null);
         }
+
+        private async void ClaudeSwitch_Click(object sender, RoutedEventArgs e)
+        {
+            Monitoring.ClaudeMonitor _monitor = (sender as FrameworkElement)?.DataContext as Monitoring.ClaudeMonitor;
+
+            if (_monitor == null || !_monitor.CanSwitch)
+            {
+                return;
+            }
+
+            // claude-swap cambia la cuenta de ~/.claude: afecta a todas las sesiones abiertas.
+            MessageBoxResult _confirm = MessageBox.Show(
+                this,
+                string.Format("Activar {0} en claude-swap?\n\nCambia la cuenta de todas las sesiones de Claude Code abiertas.", _monitor.BaseName),
+                "Cambiar de cuenta",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question
+                );
+
+            if (_confirm != MessageBoxResult.Yes)
+            {
+                return;
+            }
+
+            string _email = _monitor.SwapEmail;
+
+            string _error = await Task.Run(() => Monitoring.ClaudeSwap.Switch(_email));
+
+            Monitoring.ClaudeMonitor.RequestRefresh();
+
+            if (_error != null)
+            {
+                MessageBox.Show(this, _error, "Cambiar de cuenta", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+        }
         
         private void Window_MouseEnter(object sender, MouseEventArgs e)
         {

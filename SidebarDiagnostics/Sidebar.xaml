@@ -171,9 +171,26 @@
                                                 </StackPanel>
                                             </DataTemplate>
 
-                                            <DataTemplate DataType="{x:Type monitor:ClaudeMonitor}">
+                                            <ContextMenu x:Key="ClaudeAccountMenu" x:Shared="False">
+                                                <MenuItem Header="Pseudonimo..." Click="ClaudeAlias_Click" />
+                                                <MenuItem Header="Mostrar correo" Click="ClaudeAliasClear_Click" />
+                                                <MenuItem Header="Cambiar a esta cuenta" Click="ClaudeSwitch_Click">
+                                                    <MenuItem.Style>
+                                                        <Style TargetType="{x:Type MenuItem}">
+                                                            <Setter Property="Visibility" Value="Collapsed" />
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding Path=CanSwitch, Mode=OneWay}" Value="True">
+                                                                    <Setter Property="Visibility" Value="Visible" />
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </MenuItem.Style>
+                                                </MenuItem>
+                                            </ContextMenu>
+
+                                            <DataTemplate DataType="{x:Type monitor:ClaudeBaseMonitor}">
                                                 <StackPanel Style="{StaticResource MonitorPanel}">
-                                                    <TextBlock Text="{Binding Path=Name, Mode=OneWay}" ToolTip="{Binding Path=DefaultName, Mode=OneWay}">
+                                                    <TextBlock Text="{Binding Path=Name, Mode=OneWay}">
                                                         <TextBlock.Style>
                                                             <Style TargetType="{x:Type TextBlock}" BasedOn="{StaticResource HardwareText}">
                                                                 <Setter Property="Visibility" Value="Collapsed" />
@@ -181,23 +198,43 @@
                                                                     <DataTrigger Binding="{Binding Path=ShowName, Mode=OneWay}" Value="True">
                                                                         <Setter Property="Visibility" Value="Visible" />
                                                                     </DataTrigger>
+                                                                    <DataTrigger Binding="{Binding Path=IsAccount, Mode=OneWay}" Value="True">
+                                                                        <Setter Property="ContextMenu" Value="{StaticResource ClaudeAccountMenu}" />
+                                                                        <Setter Property="ToolTip" Value="{Binding Path=DefaultName, Mode=OneWay}" />
+                                                                    </DataTrigger>
                                                                 </Style.Triggers>
                                                             </Style>
                                                         </TextBlock.Style>
-                                                        <TextBlock.ContextMenu>
-                                                            <ContextMenu>
-                                                                <MenuItem Header="Pseudonimo..." Click="ClaudeAlias_Click" />
-                                                                <MenuItem Header="Mostrar correo" Click="ClaudeAliasClear_Click" />
-                                                            </ContextMenu>
-                                                        </TextBlock.ContextMenu>
                                                     </TextBlock>
 
                                                     <ItemsControl ItemsSource="{Binding Path=Metrics, Mode=OneWay}">
+                                                        <ItemsControl.Style>
+                                                            <Style TargetType="{x:Type ItemsControl}">
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding Path=IsStale, Mode=OneWay}" Value="True">
+                                                                        <Setter Property="Opacity" Value="0.5" />
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </ItemsControl.Style>
                                                         <ItemsControl.ItemTemplate>
-                                                            <DataTemplate DataType="{x:Type monitor:iMetric}">
+                                                            <DataTemplate DataType="{x:Type monitor:ClaudeMetric}">
                                                                 <DockPanel Style="{StaticResource MetricPanel}">
                                                                     <TextBlock Text="{Binding Path=Label, Mode=OneWay, Converter={StaticResource MetricLabelConverter}}" Style="{StaticResource MetricLabel}" />
-                                                                    <TextBlock Text="{Binding Path=Text, Mode=OneWay}" Style="{StaticResource MetricValue}" />
+                                                                    <TextBlock Text="{Binding Path=Text, Mode=OneWay}">
+                                                                        <TextBlock.Style>
+                                                                            <Style TargetType="{x:Type TextBlock}" BasedOn="{StaticResource MetricValue}">
+                                                                                <Style.Triggers>
+                                                                                    <DataTrigger Binding="{Binding Path=Level, Mode=OneWay}" Value="1">
+                                                                                        <Setter Property="Foreground" Value="#FFC107" />
+                                                                                    </DataTrigger>
+                                                                                    <DataTrigger Binding="{Binding Path=Level, Mode=OneWay}" Value="2">
+                                                                                        <Setter Property="Foreground" Value="{Binding Source={x:Static frame:Settings.Instance}, Path=AlertFontColor, Mode=OneWay}" />
+                                                                                    </DataTrigger>
+                                                                                </Style.Triggers>
+                                                                            </Style>
+                                                                        </TextBlock.Style>
+                                                                    </TextBlock>
                                                                 </DockPanel>
                                                             </DataTemplate>
                                                         </ItemsControl.ItemTemplate>
