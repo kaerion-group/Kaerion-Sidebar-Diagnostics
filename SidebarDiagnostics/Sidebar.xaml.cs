@@ -249,7 +249,7 @@ namespace SidebarDiagnostics
 
         private void ClaudeAliasClear_Click(object sender, RoutedEventArgs e)
         {
-            ((sender as FrameworkElement)?.DataContext as Monitoring.ClaudeMonitor)?.SetAlias(null);
+            ((sender as FrameworkElement)?.DataContext as Monitoring.ClaudeMonitor)?.ShowEmail();
         }
 
         private async void ClaudeSwitch_Click(object sender, RoutedEventArgs e)
@@ -262,28 +262,22 @@ namespace SidebarDiagnostics
             }
 
             // claude-swap cambia la cuenta de ~/.claude: afecta a todas las sesiones abiertas.
-            MessageBoxResult _confirm = MessageBox.Show(
+            bool _confirm = Monitoring.ClaudeConfirm.Show(
                 this,
-                string.Format("Activar {0} en claude-swap?\n\nCambia la cuenta de todas las sesiones de Claude Code abiertas.", _monitor.BaseName),
                 "Cambiar de cuenta",
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Question
+                string.Format("Activar {0} en claude-swap?\n\nCambia la cuenta de todas las sesiones de Claude Code abiertas.", _monitor.BaseName)
                 );
 
-            if (_confirm != MessageBoxResult.Yes)
+            if (!_confirm)
             {
                 return;
             }
 
-            string _email = _monitor.SwapEmail;
-
-            string _error = await Task.Run(() => Monitoring.ClaudeSwap.Switch(_email));
-
-            Monitoring.ClaudeMonitor.RequestRefresh();
+            string _error = await Monitoring.ClaudeMonitor.SwitchTo(_monitor.SwapEmail);
 
             if (_error != null)
             {
-                MessageBox.Show(this, _error, "Cambiar de cuenta", MessageBoxButton.OK, MessageBoxImage.Warning);
+                Monitoring.ClaudeConfirm.Show(this, "Cambiar de cuenta", "No se pudo cambiar de cuenta:\n\n" + _error, false);
             }
         }
         

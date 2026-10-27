@@ -852,6 +852,42 @@ namespace SidebarDiagnostics.Framework {
             }
         }
 
+        public static string SettingsClaudeAutoSwitch {
+            get {
+                return ResourceManager.GetString("SettingsClaudeAutoSwitch", resourceCulture);
+            }
+        }
+
+        public static string SettingsClaudeAutoSwitchTooltip {
+            get {
+                return ResourceManager.GetString("SettingsClaudeAutoSwitchTooltip", resourceCulture);
+            }
+        }
+
+        public static string SettingsClaudeSwitchAt {
+            get {
+                return ResourceManager.GetString("SettingsClaudeSwitchAt", resourceCulture);
+            }
+        }
+
+        public static string SettingsClaudeSwitchAtTooltip {
+            get {
+                return ResourceManager.GetString("SettingsClaudeSwitchAtTooltip", resourceCulture);
+            }
+        }
+
+        public static string SettingsClaudeSwitchBelow {
+            get {
+                return ResourceManager.GetString("SettingsClaudeSwitchBelow", resourceCulture);
+            }
+        }
+
+        public static string SettingsClaudeSwitchBelowTooltip {
+            get {
+                return ResourceManager.GetString("SettingsClaudeSwitchBelowTooltip", resourceCulture);
+            }
+        }
+
         /// <summary>
         ///   Looks up a localized string similar to Exhaustion estimate.
         /// </summary>

@@ -823,11 +823,11 @@ namespace SidebarDiagnostics.Monitoring
 
     /// <summary>
     /// Peso de una cuenta segun el plan escrito entre parentesis en su nombre:
-    /// "(Pro)" = 1, "(X5)" o "(Max5)" = 5, "(X20)" = 20, "(Max)" = 5. Sin etiqueta cuenta como Pro.
+    /// "(Pro)" = 1, "(5X)", "(X5)" o "(Max5)" = 5, "(20X)" = 20, "(Max)" = 5. Sin etiqueta cuenta como Pro.
     /// </summary>
     public static class ClaudePlan
     {
-        private static readonly Regex _tag = new Regex(@"\((?:pro|(?:max\s*)?x\s*(\d+)|max\s*(\d+)?)\)", RegexOptions.IgnoreCase);
+        private static readonly Regex _tag = new Regex(@"\((?:pro|(\d+)\s*x|(?:max\s*)?x\s*(\d+)|max\s*(\d+)?)\)", RegexOptions.IgnoreCase);
 
         public static double Weight(string name)
         {
@@ -838,17 +838,23 @@ namespace SidebarDiagnostics.Monitoring
                 return 1;
             }
 
-            if (_match.Groups[1].Success)
+            for (int i = 1; i <= 3; i++)
             {
-                return Math.Max(1, int.Parse(_match.Groups[1].Value));
+                if (_match.Groups[i].Success)
+                {
+                    return Math.Max(1, int.Parse(_match.Groups[i].Value));
+                }
             }
 
-            if (_match.Value.IndexOf("max", StringComparison.OrdinalIgnoreCase) >= 0)
-            {
-                return _match.Groups[2].Success ? Math.Max(1, int.Parse(_match.Groups[2].Value)) : 5;
-            }
+            return _match.Value.IndexOf("max", StringComparison.OrdinalIgnoreCase) >= 0 ? 5 : 1;
+        }
 
-            return 1;
+        /// <summary>La etiqueta de plan del nombre, como " (Pro)", o "" si no tiene.</summary>
+        public static string Tag(string name)
+        {
+            Match _match = _tag.Match(name ?? "");
+
+            return _match.Success ? " " + _match.Value : "";
         }
     }
 
@@ -989,6 +995,32 @@ namespace SidebarDiagnostics.Monitoring
                 return null;
             }
 
+            double? _rate = Rate(now);
+
+            if (!_rate.HasValue || _rate.Value <= 0)
+            {
+                return null;
+            }
+
+            TimeSpan _toFull = TimeSpan.FromHours((100 - _percent.Value) / _rate.Value);
+
+            return now + _toFull < _reset.Value ? _toFull : (TimeSpan?)null;
+        }
+
+        /// <summary>Ritmo de consumo actual en puntos de porcentaje por hora; null sin datos suficientes.</summary>
+        public double? Rate(DateTime now)
+        {
+            if (!_reset.HasValue || !_percent.HasValue)
+            {
+                return null;
+            }
+
+            // La ventana ya se reinicio desde la ultima lectura: aun no hay ritmo nuevo.
+            if (_reset.Value <= now)
+            {
+                return 0;
+            }
+
             DateTime _start = _reset.Value - _window;
             DateTime _since = now - TimeSpan.FromTicks(Math.Min(_window.Ticks / 5, MAXLOOKBACK.Ticks));
 
@@ -1012,14 +1044,7 @@ namespace SidebarDiagnostics.Monitoring
                 _rate = _percent.Value / (now - _start).TotalHours;
             }
 
-            if (!_rate.HasValue || _rate.Value <= 0)
-            {
-                return null;
-            }
-
-            TimeSpan _toFull = TimeSpan.FromHours((100 - _percent.Value) / _rate.Value);
-
-            return now + _toFull < _reset.Value ? _toFull : (TimeSpan?)null;
+            return _rate;
         }
 
         private byte _level { get; set; } = LEVELNORMAL;
@@ -1128,6 +1153,8 @@ namespace SidebarDiagnostics.Monitoring
             }
 
             Metrics = _metrics.ToArray();
+
+            _instances.Add(new WeakReference<ClaudeMonitor>(this));
         }
 
         public static IEnumerable<HardwareConfig> GetHardware()
@@ -1161,13 +1188,89 @@ namespace SidebarDiagnostics.Monitoring
                 return _monitors;
             }
 
-            return new iMonitor[] { new ClaudeTotalMonitor(_monitors, _showName) }.Concat(_monitors).ToArray();
+            return new iMonitor[] { new ClaudeTotalMonitor(_monitors, metrics, parameters, _showName) }.Concat(_monitors).ToArray();
         }
 
         /// <summary>Hace que todas las cuentas vuelvan a consultar en la proxima actualizacion.</summary>
         public static void RequestRefresh()
         {
             _refreshRequested = DateTime.UtcNow;
+        }
+
+        /// <summary>
+        /// Activa la cuenta con claude-swap y, si funciona, la marca como activa en el sidebar sin esperar
+        /// a la siguiente consulta. Devuelve el error, o null si funciono. Se llama desde el hilo de la UI.
+        /// </summary>
+        public static async Task<string> SwitchTo(string email)
+        {
+            string _error = await Task.Run(() => ClaudeSwap.Switch(email));
+
+            if (_error == null)
+            {
+                _instances.RemoveAll(r => { ClaudeMonitor _m; return !r.TryGetTarget(out _m); });
+
+                foreach (WeakReference<ClaudeMonitor> _reference in _instances)
+                {
+                    ClaudeMonitor _monitor;
+
+                    if (_reference.TryGetTarget(out _monitor) && _monitor._account.IsSwap)
+                    {
+                        _monitor.IsActive = string.Equals(_monitor.SwapEmail, email, StringComparison.OrdinalIgnoreCase);
+                    }
+                }
+            }
+
+            RequestRefresh();
+
+            return _error;
+        }
+
+        // Monitores vivos, para reflejar un cambio de cuenta al instante; se recrean al recargar el sidebar.
+        private static readonly List<WeakReference<ClaudeMonitor>> _instances = new List<WeakReference<ClaudeMonitor>>();
+
+        /// <summary>Correo de la cuenta (el de claude-swap o el de su carpeta de configuracion).</summary>
+        public string Email
+        {
+            get { return _account.SwapEmail ?? ClaudeAccountStore.GetEmail(_account.CredentialsPath) ?? DefaultName; }
+        }
+
+        /// <summary>Muestra el correo en lugar del pseudonimo, conservando la etiqueta del plan.</summary>
+        public void ShowEmail()
+        {
+            SetAlias(Email + ClaudePlan.Tag(BaseName));
+        }
+
+        /// <summary>Porcentaje usado de una ventana segun el ultimo dato; 0 si ya se reinicio desde entonces.</summary>
+        public double? UsedPercent(bool week)
+        {
+            if (LastUsage == null)
+            {
+                return null;
+            }
+
+            return 100 - Left(week ? LastUsage.WeekPercent : LastUsage.SessionPercent, week ? LastUsage.WeekReset : LastUsage.SessionReset, DateTime.UtcNow);
+        }
+
+        /// <summary>Proximo reinicio semanal; si el ultimo dato ya quedo atras, el de la semana siguiente.</summary>
+        public DateTime? NextWeekReset
+        {
+            get
+            {
+                DateTime? _reset = LastUsage?.WeekReset;
+
+                return _reset.HasValue && _reset.Value <= DateTime.UtcNow ? _reset.Value + WEEK : _reset;
+            }
+        }
+
+        /// <summary>Consumo semanal actual en unidades de plan (Pro = 1) por hora; null sin datos.</summary>
+        public double? WeekRate
+        {
+            get
+            {
+                double? _rate = _week?.Rate(DateTime.UtcNow);
+
+                return _rate.HasValue ? _rate.Value * Weight / 100 : (double?)null;
+            }
         }
 
         public override bool IsAccount
@@ -1342,7 +1445,7 @@ namespace SidebarDiagnostics.Monitoring
             IsStale = LastUsage?.FetchedAt != null && DateTime.UtcNow - LastUsage.FetchedAt.Value > STALE;
         }
 
-        // Fila Estimate: la ventana que se agotaria primero al ritmo actual, antes de su reinicio.
+        // Fila Estimate: cuando se agotaria la ventana semanal al ritmo actual, si es antes de su reinicio.
         private void ShowEstimate()
         {
             if (_estimate == null)
@@ -1356,20 +1459,15 @@ namespace SidebarDiagnostics.Monitoring
                 return;
             }
 
-            TimeSpan? _sessionLeft = _session?.Exhaust;
             TimeSpan? _weekLeft = _week?.Exhaust;
 
-            if (!_sessionLeft.HasValue && !_weekLeft.HasValue)
+            if (!_weekLeft.HasValue)
             {
                 _estimate.SetText("ok");
                 return;
             }
 
-            bool _weekFirst = !_sessionLeft.HasValue || (_weekLeft.HasValue && _weekLeft.Value < _sessionLeft.Value);
-
-            string _text = string.Format("{0} {1} ({2})", (char)0x26A0, ClaudeMetric.FormatSpan(_weekFirst ? _weekLeft.Value : _sessionLeft.Value), _weekFirst ? "7d" : "5h");
-
-            _estimate.SetText(_text, ClaudeMetric.LEVELWARN);
+            _estimate.SetText(string.Format("{0} {1}", (char)0x26A0, ClaudeMetric.FormatSpan(_weekLeft.Value)), ClaudeMetric.LEVELWARN);
         }
 
         private async void Fetch()
@@ -1479,18 +1577,39 @@ namespace SidebarDiagnostics.Monitoring
     /// </summary>
     public class ClaudeTotalMonitor : ClaudeBaseMonitor
     {
-        public ClaudeTotalMonitor(ClaudeMonitor[] accounts, bool showName) : base("claude-total", "Total", showName)
+        private static readonly TimeSpan SWITCHCOOLDOWN = TimeSpan.FromMinutes(5);
+
+        public ClaudeTotalMonitor(ClaudeMonitor[] accounts, MetricConfig[] metrics, ConfigParam[] parameters, bool showName) : base("claude-total", "Total", showName)
         {
             _accounts = accounts;
+
+            _autoSwitch = parameters.GetValue<bool>(ParamKey.ClaudeAutoSwitch);
+            _switchAt = parameters.GetValue<int>(ParamKey.ClaudeSwitchAt);
+            _switchBelow = parameters.GetValue<int>(ParamKey.ClaudeSwitchBelow);
+
+            List<iMetric> _metrics = new List<iMetric>();
 
             _now = new ClaudeMetric(MetricKey.ClaudeSession, SESSION, "Ahora");
             _week = new ClaudeMetric(MetricKey.ClaudeWeek, WEEK, "7d");
 
-            Metrics = new iMetric[] { _now, _week };
+            _metrics.Add(_now);
+            _metrics.Add(_week);
+
+            if (metrics.IsEnabled(MetricKey.ClaudeEstimate))
+            {
+                _estimate = new ClaudeMetric(MetricKey.ClaudeEstimate, WEEK);
+                _metrics.Add(_estimate);
+            }
+
+            Metrics = _metrics.ToArray();
         }
 
         public override void Update()
         {
+            ShowEstimate();
+
+            AutoSwitch();
+
             double _total = _accounts.Sum(a => a.Weight);
 
             string _name = string.Format("Total ({0:0.#} Pro)", _total);
@@ -1536,11 +1655,155 @@ namespace SidebarDiagnostics.Monitoring
             metric.SetText(string.Format("{0}% \u00B7 {1:0.#} Pro", _percent, _units), _level);
         }
 
+        // Estimate del total: cuanto dura la capacidad semanal libre de todas las cuentas al ritmo de
+        // consumo combinado. Avisa si se acaba antes del proximo reinicio semanal de cualquier cuenta,
+        // que es cuando vuelve a haber capacidad.
+        private void ShowEstimate()
+        {
+            if (_estimate == null)
+            {
+                return;
+            }
+
+            ClaudeMonitor[] _known = _accounts.Where(a => a.LastUsage != null).ToArray();
+
+            if (_known.Length == 0)
+            {
+                _estimate.SetText("...");
+                return;
+            }
+
+            double _rate = _known.Sum(a => a.WeekRate ?? 0);
+            double _left = _known.Sum(a => a.Remaining(false) ?? 0);
+
+            if (_rate <= 0)
+            {
+                _estimate.SetText("ok");
+                return;
+            }
+
+            TimeSpan _toEmpty = TimeSpan.FromHours(_left / _rate);
+
+            DateTime? _nextReset = _known.Select(a => a.NextWeekReset).Where(r => r.HasValue).Min();
+
+            bool _beforeReset = _nextReset.HasValue && DateTime.UtcNow + _toEmpty < _nextReset.Value;
+
+            _estimate.SetText(
+                _beforeReset ? string.Format("{0} {1}", (char)0x26A0, ClaudeMetric.FormatSpan(_toEmpty)) : ClaudeMetric.FormatSpan(_toEmpty),
+                _beforeReset ? ClaudeMetric.LEVELWARN : ClaudeMetric.LEVELNORMAL
+                );
+        }
+
+        // Cambio automatico: si la cuenta activa llega al umbral (5h o 7d), pasa a la cuenta cuyo
+        // reinicio semanal esta mas cerca entre las que estan por debajo del maximo semanal; asi se
+        // gasta primero la capacidad que se pierde antes.
+        private async void AutoSwitch()
+        {
+            if (!_autoSwitch || _switching || DateTime.UtcNow < _nextSwitch)
+            {
+                return;
+            }
+
+            ClaudeMonitor _active = _accounts.FirstOrDefault(a => a.IsActive);
+
+            if (_active == null || _active.LastUsage == null || _active.IsStale || _active.Status != ClaudeUsageStatus.Ok)
+            {
+                return;
+            }
+
+            if ((_active.UsedPercent(false) ?? 0) < _switchAt && (_active.UsedPercent(true) ?? 0) < _switchAt)
+            {
+                return;
+            }
+
+            ClaudeMonitor _target = _accounts
+                .Where(a => a != _active && a.CanSwitch && a.Status == ClaudeUsageStatus.Ok && a.LastUsage != null)
+                .Where(a => (a.UsedPercent(true) ?? 0) < _switchBelow && (a.UsedPercent(false) ?? 0) < _switchAt)
+                .OrderBy(a => a.NextWeekReset ?? DateTime.MaxValue)
+                .FirstOrDefault();
+
+            if (_target == null)
+            {
+                return;
+            }
+
+            _switching = true;
+
+            string _error = await ClaudeMonitor.SwitchTo(_target.SwapEmail);
+
+            _switching = false;
+            _nextSwitch = DateTime.UtcNow + SWITCHCOOLDOWN;
+
+            if (_error != null)
+            {
+                Debug.WriteLine("Cambio automatico de cuenta fallido: " + _error);
+            }
+        }
+
         private ClaudeMonitor[] _accounts { get; set; }
 
         private ClaudeMetric _now { get; set; }
 
         private ClaudeMetric _week { get; set; }
+
+        private ClaudeMetric _estimate { get; set; }
+
+        private bool _autoSwitch { get; set; }
+
+        private int _switchAt { get; set; }
+
+        private int _switchBelow { get; set; }
+
+        private bool _switching { get; set; } = false;
+
+        private DateTime _nextSwitch { get; set; } = DateTime.MinValue;
+    }
+
+    /// <summary>Confirmacion Si/No siempre al frente: el sidebar es una barra de aplicacion y un MessageBox puede quedar detras.</summary>
+    public static class ClaudeConfirm
+    {
+        /// <summary>Con question = false es solo un aviso con un boton Aceptar.</summary>
+        public static bool Show(Window owner, string title, string message, bool question = true)
+        {
+            Button _yes = new Button() { Content = question ? "S" + (char)0xED : "Aceptar", IsDefault = true, MinWidth = 80, Margin = new Thickness(0, 0, 8, 0), Padding = new Thickness(8, 3, 8, 3) };
+            Button _no = new Button() { Content = "No", IsCancel = true, MinWidth = 80, Padding = new Thickness(8, 3, 8, 3) };
+
+            StackPanel _buttons = new StackPanel() { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
+            _buttons.Children.Add(_yes);
+
+            if (question)
+            {
+                _buttons.Children.Add(_no);
+            }
+            else
+            {
+                _yes.IsCancel = true;
+            }
+
+            StackPanel _panel = new StackPanel() { Margin = new Thickness(14), MaxWidth = 380 };
+            _panel.Children.Add(new TextBlock() { Text = message, TextWrapping = TextWrapping.Wrap });
+            _panel.Children.Add(_buttons);
+
+            Window _window = new Window()
+            {
+                Title = title,
+                Content = _panel,
+                SizeToContent = SizeToContent.WidthAndHeight,
+                ResizeMode = ResizeMode.NoResize,
+                WindowStartupLocation = WindowStartupLocation.CenterScreen,
+                ShowInTaskbar = false,
+                Topmost = true
+            };
+
+            if (owner != null && owner.IsVisible)
+            {
+                _window.Owner = owner;
+            }
+
+            _yes.Click += (s, e) => { _window.DialogResult = true; };
+
+            return _window.ShowDialog() == true;
+        }
     }
 
     /// <summary>Ventana minima para escribir el pseudonimo de una cuenta.</summary>

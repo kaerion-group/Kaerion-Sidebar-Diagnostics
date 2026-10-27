@@ -2107,9 +2107,12 @@ namespace SidebarDiagnostics.Monitoring
                             new MetricConfig(MetricKey.ClaudeWeek, true),
                             new MetricConfig(MetricKey.ClaudeEstimate, true)
                         },
-                        Params = new ConfigParam[1]
+                        Params = new ConfigParam[4]
                         {
-                            ConfigParam.Defaults.HardwareNames
+                            ConfigParam.Defaults.HardwareNames,
+                            ConfigParam.Defaults.ClaudeAutoSwitch,
+                            ConfigParam.Defaults.ClaudeSwitchAt,
+                            ConfigParam.Defaults.ClaudeSwitchBelow
                         }
                     },
                     new MonitorConfig()
@@ -2605,6 +2608,15 @@ namespace SidebarDiagnostics.Monitoring
                     case ParamKey.UseGHz:
                         return Resources.SettingsUseGHz;
 
+                    case ParamKey.ClaudeAutoSwitch:
+                        return Resources.SettingsClaudeAutoSwitch;
+
+                    case ParamKey.ClaudeSwitchAt:
+                        return Resources.SettingsClaudeSwitchAt;
+
+                    case ParamKey.ClaudeSwitchBelow:
+                        return Resources.SettingsClaudeSwitchBelow;
+
                     default:
                         return "Unknown";
                 }
@@ -2659,6 +2671,15 @@ namespace SidebarDiagnostics.Monitoring
                     case ParamKey.UseGHz:
                         return Resources.SettingsUseGHzTooltip;
 
+                    case ParamKey.ClaudeAutoSwitch:
+                        return Resources.SettingsClaudeAutoSwitchTooltip;
+
+                    case ParamKey.ClaudeSwitchAt:
+                        return Resources.SettingsClaudeSwitchAtTooltip;
+
+                    case ParamKey.ClaudeSwitchBelow:
+                        return Resources.SettingsClaudeSwitchBelowTooltip;
+
                     default:
                         return "Unknown";
                 }
@@ -2712,6 +2733,30 @@ namespace SidebarDiagnostics.Monitoring
                 get
                 {
                     return new ConfigParam() { Key = ParamKey.TempAlert, Value = 0 };
+                }
+            }
+
+            public static ConfigParam ClaudeAutoSwitch
+            {
+                get
+                {
+                    return new ConfigParam() { Key = ParamKey.ClaudeAutoSwitch, Value = false };
+                }
+            }
+
+            public static ConfigParam ClaudeSwitchAt
+            {
+                get
+                {
+                    return new ConfigParam() { Key = ParamKey.ClaudeSwitchAt, Value = 99 };
+                }
+            }
+
+            public static ConfigParam ClaudeSwitchBelow
+            {
+                get
+                {
+                    return new ConfigParam() { Key = ParamKey.ClaudeSwitchBelow, Value = 90 };
                 }
             }
 
@@ -2805,7 +2850,10 @@ namespace SidebarDiagnostics.Monitoring
         RoundAll,
         DriveSpace,
         DriveIO,
-        UseGHz
+        UseGHz,
+        ClaudeAutoSwitch,
+        ClaudeSwitchAt,
+        ClaudeSwitchBelow
     }
 
     public enum DataType : byte

@@ -1072,6 +1072,30 @@
     <value>7d</value>
     <comment>Short label for the Claude weekly usage metric</comment>
   </data>
+  <data name="SettingsClaudeAutoSwitch" xml:space="preserve">
+    <value>Auto switch account</value>
+    <comment>Settings Claude auto switch label</comment>
+  </data>
+  <data name="SettingsClaudeAutoSwitchTooltip" xml:space="preserve">
+    <value>When the active account reaches the switch threshold (5h or 7d), activate with claude-swap the account whose weekly limit resets soonest among those below the weekly maximum.</value>
+    <comment>Settings Claude auto switch tooltip</comment>
+  </data>
+  <data name="SettingsClaudeSwitchAt" xml:space="preserve">
+    <value>Switch at (%)</value>
+    <comment>Settings Claude auto switch threshold label</comment>
+  </data>
+  <data name="SettingsClaudeSwitchAtTooltip" xml:space="preserve">
+    <value>Usage of the active account (5h or 7d) that triggers the automatic switch.</value>
+    <comment>Settings Claude auto switch threshold tooltip</comment>
+  </data>
+  <data name="SettingsClaudeSwitchBelow" xml:space="preserve">
+    <value>Target weekly max (%)</value>
+    <comment>Settings Claude auto switch target limit label</comment>
+  </data>
+  <data name="SettingsClaudeSwitchBelowTooltip" xml:space="preserve">
+    <value>Only accounts whose weekly usage is below this value can be chosen as the next account.</value>
+    <comment>Settings Claude auto switch target limit tooltip</comment>
+  </data>
   <data name="ClaudeEstimate" xml:space="preserve">
     <value>Exhaustion estimate</value>
     <comment>Full name for the Claude metric that projects when a usage window runs out</comment>
