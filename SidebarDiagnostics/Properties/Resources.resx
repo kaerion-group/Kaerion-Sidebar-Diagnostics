@@ -1096,6 +1096,38 @@
     <value>Only accounts whose weekly usage is below this value can be chosen as the next account.</value>
     <comment>Settings Claude auto switch target limit tooltip</comment>
   </data>
+  <data name="SettingsClaudeDrainMode" xml:space="preserve">
+    <value>Use up before reset</value>
+    <comment>Settings Claude drain mode label</comment>
+  </data>
+  <data name="SettingsClaudeDrainModeTooltip" xml:space="preserve">
+    <value>With auto switch on, also switch before the threshold to the account that most needs to be used per hour to reach 100% before its weekly reset.</value>
+    <comment>Settings Claude drain mode tooltip</comment>
+  </data>
+  <data name="SettingsClaudeNotifyHours" xml:space="preserve">
+    <value>Leftover alert (hours)</value>
+    <comment>Settings Claude leftover notification label</comment>
+  </data>
+  <data name="SettingsClaudeNotifyHoursTooltip" xml:space="preserve">
+    <value>Hours before an account's weekly reset to show a notification if it would still have 20% or more unused at the current pace. 0 turns it off.</value>
+    <comment>Settings Claude leftover notification tooltip</comment>
+  </data>
+  <data name="ClaudeLeftover" xml:space="preserve">
+    <value>Leftover at reset</value>
+    <comment>Full name for the Claude metric with the weekly usage that would be left unused at reset</comment>
+  </data>
+  <data name="ClaudeLeftoverLabel" xml:space="preserve">
+    <value>Sobra</value>
+    <comment>Short label for the Claude leftover metric</comment>
+  </data>
+  <data name="ClaudePace" xml:space="preserve">
+    <value>Pace needed</value>
+    <comment>Full name for the Claude metric with the pace needed to use 100% before reset</comment>
+  </data>
+  <data name="ClaudePaceLabel" xml:space="preserve">
+    <value>Ritmo</value>
+    <comment>Short label for the Claude pace metric</comment>
+  </data>
   <data name="ClaudeEstimate" xml:space="preserve">
     <value>Exhaustion estimate</value>
     <comment>Full name for the Claude metric that projects when a usage window runs out</comment>

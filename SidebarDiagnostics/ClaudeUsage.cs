@@ -1123,6 +1123,9 @@ namespace SidebarDiagnostics.Monitoring
         private static readonly TimeSpan BACKOFF = TimeSpan.FromMinutes(5);
         private static readonly TimeSpan STALE = TimeSpan.FromMinutes(10);
 
+        // Sobra a partir de la cual la fila se pone en amarillo.
+        public const double LEFTOVERWARN = 20;
+
         private static DateTime _refreshRequested = DateTime.MinValue;
 
         public ClaudeMonitor(ClaudeAccount account, string alias, MetricConfig[] metrics, bool showName = true) : base(account.ID, string.IsNullOrEmpty(alias) ? account.Name : alias, showName)
@@ -1150,6 +1153,18 @@ namespace SidebarDiagnostics.Monitoring
             {
                 _estimate = new ClaudeMetric(MetricKey.ClaudeEstimate, WEEK);
                 _metrics.Add(_estimate);
+            }
+
+            if (metrics.IsEnabled(MetricKey.ClaudeLeftover))
+            {
+                _leftover = new ClaudeMetric(MetricKey.ClaudeLeftover, WEEK);
+                _metrics.Add(_leftover);
+            }
+
+            if (metrics.IsEnabled(MetricKey.ClaudePace))
+            {
+                _pace = new ClaudeMetric(MetricKey.ClaudePace, WEEK);
+                _metrics.Add(_pace);
             }
 
             Metrics = _metrics.ToArray();
@@ -1259,6 +1274,81 @@ namespace SidebarDiagnostics.Monitoring
                 DateTime? _reset = LastUsage?.WeekReset;
 
                 return _reset.HasValue && _reset.Value <= DateTime.UtcNow ? _reset.Value + WEEK : _reset;
+            }
+        }
+
+        /// <summary>Horas hasta el proximo reinicio semanal; null sin datos.</summary>
+        public double? HoursToWeekReset
+        {
+            get
+            {
+                DateTime? _reset = NextWeekReset;
+
+                return _reset.HasValue ? Math.Max(0, (_reset.Value - DateTime.UtcNow).TotalHours) : (double?)null;
+            }
+        }
+
+        /// <summary>
+        /// Porcentaje semanal que quedaria sin usar al reiniciarse si se sigue al ritmo actual; null sin
+        /// datos. Sin ritmo medido se asume que no se usa: todo lo libre se perderia.
+        /// </summary>
+        public double? LeftoverPercent
+        {
+            get
+            {
+                double? _used = UsedPercent(true);
+                double? _hours = HoursToWeekReset;
+
+                if (!_used.HasValue || !_hours.HasValue)
+                {
+                    return null;
+                }
+
+                double _rate = _week?.Rate(DateTime.UtcNow) ?? 0;
+
+                return Math.Max(0, 100 - _used.Value - Math.Max(0, _rate) * _hours.Value);
+            }
+        }
+
+        /// <summary>Lo que quedaria sin usar al reinicio, en unidades de plan (Pro = 1).</summary>
+        public double? LeftoverUnits
+        {
+            get
+            {
+                double? _percent = LeftoverPercent;
+
+                return _percent.HasValue ? _percent.Value * Weight / 100 : (double?)null;
+            }
+        }
+
+        /// <summary>Puntos de porcentaje semanal por hora que hacen falta para llegar al 100 % justo al reinicio.</summary>
+        public double? NeededPercentPerHour
+        {
+            get
+            {
+                double? _used = UsedPercent(true);
+                double? _hours = HoursToWeekReset;
+
+                if (!_used.HasValue || !_hours.HasValue)
+                {
+                    return null;
+                }
+
+                return (100 - _used.Value) / Math.Max(_hours.Value, 0.25);
+            }
+        }
+
+        /// <summary>
+        /// Capacidad que hay que gastar por hora, en unidades de plan, para no perder nada al reinicio. La
+        /// cuenta con el valor mas alto es la que mas urge usar; no depende de cual se esta usando ahora.
+        /// </summary>
+        public double? NeededUnitsPerHour
+        {
+            get
+            {
+                double? _needed = NeededPercentPerHour;
+
+                return _needed.HasValue ? _needed.Value * Weight / 100 : (double?)null;
             }
         }
 
@@ -1441,8 +1531,60 @@ namespace SidebarDiagnostics.Monitoring
             _week?.Refresh();
 
             ShowEstimate();
+            ShowPlanning();
 
             IsStale = LastUsage?.FetchedAt != null && DateTime.UtcNow - LastUsage.FetchedAt.Value > STALE;
+        }
+
+        // Filas Sobra y Ritmo: lo que se perderia al reinicio al ritmo actual, y el ritmo que hace falta
+        // para llegar al 100 % justo antes (por dia, o por hora en el ultimo dia).
+        private void ShowPlanning()
+        {
+            if (_leftover != null)
+            {
+                double? _percent = LeftoverPercent;
+
+                if (!_percent.HasValue)
+                {
+                    _leftover.SetText("...");
+                }
+                else
+                {
+                    _leftover.SetText(
+                        string.Format("~{0:0}%", _percent.Value),
+                        _percent.Value >= LEFTOVERWARN ? ClaudeMetric.LEVELWARN : ClaudeMetric.LEVELNORMAL
+                        );
+                }
+            }
+
+            if (_pace != null)
+            {
+                double? _needed = NeededPercentPerHour;
+                double? _hours = HoursToWeekReset;
+
+                if (!_needed.HasValue || !_hours.HasValue)
+                {
+                    _pace.SetText("...");
+                }
+                else if (_needed.Value <= 0)
+                {
+                    _pace.SetText("ok");
+                }
+                else
+                {
+                    double _current = Math.Max(0, _week?.Rate(DateTime.UtcNow) ?? 0);
+
+                    // En el ultimo dia se muestra por hora: "por dia" exageraria.
+                    bool _perDay = _hours.Value >= 24;
+                    double _factor = _perDay ? 24 : 1;
+                    string _unit = _perDay ? "%/d" : "%/h";
+
+                    _pace.SetText(
+                        string.Format("{0:0.#}{2} \u00B7 vas {1:0.#}{2}", _needed.Value * _factor, _current * _factor, _unit),
+                        _current < _needed.Value * 0.8 ? ClaudeMetric.LEVELWARN : ClaudeMetric.LEVELNORMAL
+                        );
+                }
+            }
         }
 
         // Fila Estimate: cuando se agotaria la ventana semanal al ritmo actual, si es antes de su reinicio.
@@ -1564,6 +1706,10 @@ namespace SidebarDiagnostics.Monitoring
 
         private ClaudeMetric _estimate { get; set; }
 
+        private ClaudeMetric _leftover { get; set; }
+
+        private ClaudeMetric _pace { get; set; }
+
         private bool _busy { get; set; } = false;
 
         private DateTime _nextFetch { get; set; } = DateTime.MinValue;
@@ -1578,6 +1724,7 @@ namespace SidebarDiagnostics.Monitoring
     public class ClaudeTotalMonitor : ClaudeBaseMonitor
     {
         private static readonly TimeSpan SWITCHCOOLDOWN = TimeSpan.FromMinutes(5);
+        private static readonly TimeSpan DRAINCOOLDOWN = TimeSpan.FromMinutes(30);
 
         public ClaudeTotalMonitor(ClaudeMonitor[] accounts, MetricConfig[] metrics, ConfigParam[] parameters, bool showName) : base("claude-total", "Total", showName)
         {
@@ -1586,6 +1733,8 @@ namespace SidebarDiagnostics.Monitoring
             _autoSwitch = parameters.GetValue<bool>(ParamKey.ClaudeAutoSwitch);
             _switchAt = parameters.GetValue<int>(ParamKey.ClaudeSwitchAt);
             _switchBelow = parameters.GetValue<int>(ParamKey.ClaudeSwitchBelow);
+            _drainMode = parameters.GetValue<bool>(ParamKey.ClaudeDrainMode);
+            _notifyHours = parameters.GetValue<int>(ParamKey.ClaudeNotifyHours);
 
             List<iMetric> _metrics = new List<iMetric>();
 
@@ -1601,14 +1750,22 @@ namespace SidebarDiagnostics.Monitoring
                 _metrics.Add(_estimate);
             }
 
+            if (metrics.IsEnabled(MetricKey.ClaudeLeftover))
+            {
+                _leftover = new ClaudeMetric(MetricKey.ClaudeLeftover, WEEK);
+                _metrics.Add(_leftover);
+            }
+
             Metrics = _metrics.ToArray();
         }
 
         public override void Update()
         {
             ShowEstimate();
+            ShowLeftover();
 
             AutoSwitch();
+            NotifyLeftovers();
 
             double _total = _accounts.Sum(a => a.Weight);
 
@@ -1625,16 +1782,109 @@ namespace SidebarDiagnostics.Monitoring
             // Solo se atenua si ninguna cuenta tiene dato reciente; una cuenta vieja ya se ve atenuada en su fila.
             IsStale = _accounts.Where(a => a.LastUsage != null).All(a => a.IsStale) && _accounts.Any(a => a.LastUsage != null);
 
-            // Recomendada: la de mas capacidad libre ahora entre las que responden bien. Si es la
-            // activa no se marca: lo que conviene es seguir con ella.
-            ClaudeMonitor _best = _accounts
-                .Where(a => a.Status == ClaudeUsageStatus.Ok && (a.Remaining(true) ?? 0) > 0)
-                .OrderByDescending(a => a.Remaining(true))
-                .FirstOrDefault();
+            // Recomendada: la que mas urge gastar. Solo se marca si supera claramente a la activa.
+            ClaudeMonitor _best = MostUrgent(null);
+            ClaudeMonitor _active = _accounts.FirstOrDefault(a => a.IsActive);
+
+            bool _better = _best != null && _best != _active && (_active == null || ClearlyMoreUrgent(_best, _active));
 
             foreach (ClaudeMonitor _account in _accounts)
             {
-                _account.IsRecommended = _account == _best && !_account.IsActive;
+                _account.IsRecommended = _better && _account == _best;
+            }
+        }
+
+        // Margen para considerar que otra cuenta urge mas que la activa: evita cambiar por diferencias minimas.
+        private const double URGENCYMARGIN = 1.25;
+
+        /// <summary>
+        /// La cuenta que mas capacidad necesita gastar por hora para no perder nada en su reinicio
+        /// semanal, entre las que se pueden usar ahora (dato valido y margen en 5h y 7d).
+        /// </summary>
+        private ClaudeMonitor MostUrgent(ClaudeMonitor exclude)
+        {
+            return _accounts
+                .Where(a => a != exclude && a.Status == ClaudeUsageStatus.Ok && a.LastUsage != null)
+                .Where(a => (a.UsedPercent(false) ?? 0) < _switchAt && (a.UsedPercent(true) ?? 0) < _switchBelow)
+                .Where(a => (a.NeededUnitsPerHour ?? 0) > 0)
+                .OrderByDescending(a => a.NeededUnitsPerHour)
+                .FirstOrDefault();
+        }
+
+        private static bool ClearlyMoreUrgent(ClaudeMonitor candidate, ClaudeMonitor current)
+        {
+            return (candidate.NeededUnitsPerHour ?? 0) > (current.NeededUnitsPerHour ?? 0) * URGENCYMARGIN;
+        }
+
+        // Sobra del total: suma de lo que cada cuenta perderia en su reinicio al ritmo actual.
+        private void ShowLeftover()
+        {
+            if (_leftover == null)
+            {
+                return;
+            }
+
+            ClaudeMonitor[] _known = _accounts.Where(a => a.LeftoverUnits.HasValue).ToArray();
+
+            if (_known.Length == 0)
+            {
+                _leftover.SetText("...");
+                return;
+            }
+
+            double _units = _known.Sum(a => a.LeftoverUnits.Value);
+            double _total = _accounts.Sum(a => a.Weight);
+
+            _leftover.SetText(
+                string.Format("~{0:0.#} Pro", _units),
+                _total > 0 && 100 * _units / _total >= ClaudeMonitor.LEFTOVERWARN ? ClaudeMetric.LEVELWARN : ClaudeMetric.LEVELNORMAL
+                );
+        }
+
+        // Aviso de Windows (globo del icono de bandeja) unas horas antes del reinicio semanal de una cuenta
+        // a la que, al ritmo actual, le sobraria el 20 % o mas. Una sola vez por cuenta y reinicio.
+        private void NotifyLeftovers()
+        {
+            if (_notifyHours <= 0 || DateTime.UtcNow < _nextNotifyCheck)
+            {
+                return;
+            }
+
+            _nextNotifyCheck = DateTime.UtcNow + TimeSpan.FromMinutes(1);
+
+            foreach (ClaudeMonitor _account in _accounts)
+            {
+                double? _hours = _account.HoursToWeekReset;
+                double? _percent = _account.LeftoverPercent;
+                DateTime? _reset = _account.NextWeekReset;
+
+                if (!_hours.HasValue || !_percent.HasValue || !_reset.HasValue || _account.Status != ClaudeUsageStatus.Ok)
+                {
+                    continue;
+                }
+
+                if (_hours.Value > _notifyHours || _percent.Value < ClaudeMonitor.LEFTOVERWARN)
+                {
+                    continue;
+                }
+
+                // El reinicio se redondea a la hora: claude-swap y la API lo dan con milisegundos distintos.
+                string _key = string.Format("{0}|{1:yyyyMMddHH}", _account.ID, _reset.Value);
+
+                if (!_notified.Add(_key))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    App.TrayIcon?.ShowBalloonTip(
+                        "Capacidad de Claude por perderse",
+                        string.Format("{0} se reinicia en {1} y le sobraria ~{2:0}% al ritmo actual.", _account.BaseName, ClaudeMetric.FormatSpan(TimeSpan.FromHours(_hours.Value)), _percent.Value),
+                        Hardcodet.Wpf.TaskbarNotification.BalloonIcon.Info
+                        );
+                }
+                catch (Exception) { }
             }
         }
 
@@ -1694,9 +1944,12 @@ namespace SidebarDiagnostics.Monitoring
                 );
         }
 
-        // Cambio automatico: si la cuenta activa llega al umbral (5h o 7d), pasa a la cuenta cuyo
-        // reinicio semanal esta mas cerca entre las que estan por debajo del maximo semanal; asi se
-        // gasta primero la capacidad que se pierde antes.
+        // Cambio automatico, en dos casos:
+        // 1. La cuenta activa llega al umbral (5h o 7d): pasa a la cuenta cuyo reinicio semanal esta mas
+        //    cerca entre las que estan por debajo del maximo semanal.
+        // 2. Con "agotar antes del reinicio": otra cuenta urge claramente mas que la activa (necesita
+        //    gastar mas capacidad por hora para no perder nada). Espera mas entre cambios para no saltar
+        //    de una cuenta a otra.
         private async void AutoSwitch()
         {
             if (!_autoSwitch || _switching || DateTime.UtcNow < _nextSwitch)
@@ -1711,16 +1964,27 @@ namespace SidebarDiagnostics.Monitoring
                 return;
             }
 
-            if ((_active.UsedPercent(false) ?? 0) < _switchAt && (_active.UsedPercent(true) ?? 0) < _switchAt)
-            {
-                return;
-            }
+            ClaudeMonitor _target = null;
+            TimeSpan _cooldown = SWITCHCOOLDOWN;
 
-            ClaudeMonitor _target = _accounts
-                .Where(a => a != _active && a.CanSwitch && a.Status == ClaudeUsageStatus.Ok && a.LastUsage != null)
-                .Where(a => (a.UsedPercent(true) ?? 0) < _switchBelow && (a.UsedPercent(false) ?? 0) < _switchAt)
-                .OrderBy(a => a.NextWeekReset ?? DateTime.MaxValue)
-                .FirstOrDefault();
+            if ((_active.UsedPercent(false) ?? 0) >= _switchAt || (_active.UsedPercent(true) ?? 0) >= _switchAt)
+            {
+                _target = _accounts
+                    .Where(a => a != _active && a.CanSwitch && a.Status == ClaudeUsageStatus.Ok && a.LastUsage != null)
+                    .Where(a => (a.UsedPercent(true) ?? 0) < _switchBelow && (a.UsedPercent(false) ?? 0) < _switchAt)
+                    .OrderBy(a => a.NextWeekReset ?? DateTime.MaxValue)
+                    .FirstOrDefault();
+            }
+            else if (_drainMode)
+            {
+                ClaudeMonitor _urgent = MostUrgent(_active);
+
+                if (_urgent != null && _urgent.CanSwitch && !_urgent.IsStale && ClearlyMoreUrgent(_urgent, _active))
+                {
+                    _target = _urgent;
+                    _cooldown = DRAINCOOLDOWN;
+                }
+            }
 
             if (_target == null)
             {
@@ -1732,7 +1996,7 @@ namespace SidebarDiagnostics.Monitoring
             string _error = await ClaudeMonitor.SwitchTo(_target.SwapEmail);
 
             _switching = false;
-            _nextSwitch = DateTime.UtcNow + SWITCHCOOLDOWN;
+            _nextSwitch = DateTime.UtcNow + _cooldown;
 
             if (_error != null)
             {
@@ -1748,15 +2012,26 @@ namespace SidebarDiagnostics.Monitoring
 
         private ClaudeMetric _estimate { get; set; }
 
+        private ClaudeMetric _leftover { get; set; }
+
         private bool _autoSwitch { get; set; }
 
         private int _switchAt { get; set; }
 
         private int _switchBelow { get; set; }
 
+        private bool _drainMode { get; set; }
+
+        private int _notifyHours { get; set; }
+
         private bool _switching { get; set; } = false;
 
         private DateTime _nextSwitch { get; set; } = DateTime.MinValue;
+
+        private DateTime _nextNotifyCheck { get; set; } = DateTime.MinValue;
+
+        // Avisos ya mostrados; estatico para no repetirlos cuando el sidebar se recarga.
+        private static readonly HashSet<string> _notified = new HashSet<string>();
     }
 
     /// <summary>Confirmacion Si/No siempre al frente: el sidebar es una barra de aplicacion y un MessageBox puede quedar detras.</summary>

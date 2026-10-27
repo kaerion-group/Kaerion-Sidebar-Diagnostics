@@ -852,6 +852,54 @@ namespace SidebarDiagnostics.Framework {
             }
         }
 
+        public static string SettingsClaudeDrainMode {
+            get {
+                return ResourceManager.GetString("SettingsClaudeDrainMode", resourceCulture);
+            }
+        }
+
+        public static string SettingsClaudeDrainModeTooltip {
+            get {
+                return ResourceManager.GetString("SettingsClaudeDrainModeTooltip", resourceCulture);
+            }
+        }
+
+        public static string SettingsClaudeNotifyHours {
+            get {
+                return ResourceManager.GetString("SettingsClaudeNotifyHours", resourceCulture);
+            }
+        }
+
+        public static string SettingsClaudeNotifyHoursTooltip {
+            get {
+                return ResourceManager.GetString("SettingsClaudeNotifyHoursTooltip", resourceCulture);
+            }
+        }
+
+        public static string ClaudeLeftover {
+            get {
+                return ResourceManager.GetString("ClaudeLeftover", resourceCulture);
+            }
+        }
+
+        public static string ClaudeLeftoverLabel {
+            get {
+                return ResourceManager.GetString("ClaudeLeftoverLabel", resourceCulture);
+            }
+        }
+
+        public static string ClaudePace {
+            get {
+                return ResourceManager.GetString("ClaudePace", resourceCulture);
+            }
+        }
+
+        public static string ClaudePaceLabel {
+            get {
+                return ResourceManager.GetString("ClaudePaceLabel", resourceCulture);
+            }
+        }
+
         public static string SettingsClaudeAutoSwitch {
             get {
                 return ResourceManager.GetString("SettingsClaudeAutoSwitch", resourceCulture);

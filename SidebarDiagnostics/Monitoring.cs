@@ -2101,18 +2101,22 @@ namespace SidebarDiagnostics.Monitoring
                         Enabled = true,
                         Order = 6,
                         Hardware = new HardwareConfig[0],
-                        Metrics = new MetricConfig[3]
+                        Metrics = new MetricConfig[5]
                         {
                             new MetricConfig(MetricKey.ClaudeSession, true),
                             new MetricConfig(MetricKey.ClaudeWeek, true),
-                            new MetricConfig(MetricKey.ClaudeEstimate, true)
+                            new MetricConfig(MetricKey.ClaudeEstimate, true),
+                            new MetricConfig(MetricKey.ClaudeLeftover, true),
+                            new MetricConfig(MetricKey.ClaudePace, true)
                         },
-                        Params = new ConfigParam[4]
+                        Params = new ConfigParam[6]
                         {
                             ConfigParam.Defaults.HardwareNames,
                             ConfigParam.Defaults.ClaudeAutoSwitch,
                             ConfigParam.Defaults.ClaudeSwitchAt,
-                            ConfigParam.Defaults.ClaudeSwitchBelow
+                            ConfigParam.Defaults.ClaudeSwitchBelow,
+                            ConfigParam.Defaults.ClaudeDrainMode,
+                            ConfigParam.Defaults.ClaudeNotifyHours
                         }
                     },
                     new MonitorConfig()
@@ -2471,6 +2475,8 @@ namespace SidebarDiagnostics.Monitoring
         ClaudeWeek = 29,
         // 30 era ClaudeReset: el reinicio ahora va junto a cada porcentaje.
         ClaudeEstimate = 31,
+        ClaudeLeftover = 32,
+        ClaudePace = 33,
 
         DriveLoadBar = 20,
         DriveLoad = 21,
@@ -2617,6 +2623,12 @@ namespace SidebarDiagnostics.Monitoring
                     case ParamKey.ClaudeSwitchBelow:
                         return Resources.SettingsClaudeSwitchBelow;
 
+                    case ParamKey.ClaudeDrainMode:
+                        return Resources.SettingsClaudeDrainMode;
+
+                    case ParamKey.ClaudeNotifyHours:
+                        return Resources.SettingsClaudeNotifyHours;
+
                     default:
                         return "Unknown";
                 }
@@ -2679,6 +2691,12 @@ namespace SidebarDiagnostics.Monitoring
 
                     case ParamKey.ClaudeSwitchBelow:
                         return Resources.SettingsClaudeSwitchBelowTooltip;
+
+                    case ParamKey.ClaudeDrainMode:
+                        return Resources.SettingsClaudeDrainModeTooltip;
+
+                    case ParamKey.ClaudeNotifyHours:
+                        return Resources.SettingsClaudeNotifyHoursTooltip;
 
                     default:
                         return "Unknown";
@@ -2757,6 +2775,22 @@ namespace SidebarDiagnostics.Monitoring
                 get
                 {
                     return new ConfigParam() { Key = ParamKey.ClaudeSwitchBelow, Value = 90 };
+                }
+            }
+
+            public static ConfigParam ClaudeDrainMode
+            {
+                get
+                {
+                    return new ConfigParam() { Key = ParamKey.ClaudeDrainMode, Value = false };
+                }
+            }
+
+            public static ConfigParam ClaudeNotifyHours
+            {
+                get
+                {
+                    return new ConfigParam() { Key = ParamKey.ClaudeNotifyHours, Value = 12 };
                 }
             }
 
@@ -2853,7 +2887,9 @@ namespace SidebarDiagnostics.Monitoring
         UseGHz,
         ClaudeAutoSwitch,
         ClaudeSwitchAt,
-        ClaudeSwitchBelow
+        ClaudeSwitchBelow,
+        ClaudeDrainMode,
+        ClaudeNotifyHours
     }
 
     public enum DataType : byte
@@ -3280,6 +3316,12 @@ namespace SidebarDiagnostics.Monitoring
                 case MetricKey.ClaudeEstimate:
                     return Resources.ClaudeEstimate;
 
+                case MetricKey.ClaudeLeftover:
+                    return Resources.ClaudeLeftover;
+
+                case MetricKey.ClaudePace:
+                    return Resources.ClaudePace;
+
                 default:
                     return "Unknown";
             }
@@ -3381,6 +3423,12 @@ namespace SidebarDiagnostics.Monitoring
 
                 case MetricKey.ClaudeEstimate:
                     return Resources.ClaudeEstimateLabel;
+
+                case MetricKey.ClaudeLeftover:
+                    return Resources.ClaudeLeftoverLabel;
+
+                case MetricKey.ClaudePace:
+                    return Resources.ClaudePaceLabel;
 
                 default:
                     return "Unknown";
