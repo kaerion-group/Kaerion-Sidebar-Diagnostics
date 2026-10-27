@@ -551,9 +551,12 @@ namespace SidebarDiagnostics.Monitoring
             return _client;
         }
 
+        // claude-swap refresca su cache cada ~5 min; pasado este margen el dato se considera viejo.
+        private static readonly TimeSpan STALE = TimeSpan.FromMinutes(10);
+
         /// <summary>
-        /// Cuentas de claude-swap: la activa se consulta directo con ~/.claude (dato al minuto) y las
-        /// demas salen de la cache de claude-swap. El resto de cuentas, directo con su .credentials.json.
+        /// Cuentas de claude-swap: salen de su cache; si el dato esta viejo, la activa se consulta
+        /// directo con ~/.claude. El resto de cuentas, directo con su .credentials.json.
         /// </summary>
         public static async Task<ClaudeUsage> FetchAsync(ClaudeAccount account)
         {
@@ -570,8 +573,16 @@ namespace SidebarDiagnostics.Monitoring
                 return new ClaudeUsage() { Status = ClaudeSwap.LastOk ? ClaudeUsageStatus.NoCredentials : ClaudeUsageStatus.Error };
             }
 
+            // Si el dato de claude-swap es reciente se usa tal cual: consultar directo gasta el mismo
+            // cupo de consultas por token que claude-swap y provoca 429.
+            if (_swap.Usage.Status == ClaudeUsageStatus.Ok && _swap.FetchedAt.HasValue && DateTime.UtcNow - _swap.FetchedAt.Value < STALE)
+            {
+                return _swap.Usage;
+            }
+
             string _default = ClaudeAccountStore.DefaultCredentialsPath;
 
+            // Dato viejo: solo la cuenta activa se puede consultar directo, con ~/.claude.
             if (_swap.Active && string.Equals(ClaudeAccountStore.GetEmail(_default), _swap.Email, StringComparison.OrdinalIgnoreCase))
             {
                 ClaudeUsage _direct = await FetchAsync(_default).ConfigureAwait(false);
