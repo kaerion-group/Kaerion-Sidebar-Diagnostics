@@ -140,6 +140,12 @@ namespace SidebarDiagnostics
 
         private async Task AppUpdate(bool showInfo)
         {
+            // Sin URL de publicacion propia no hay actualizacion automatica: la version original desharia estos cambios
+            if (string.IsNullOrEmpty(ConfigurationManager.AppSettings["CurrentReleaseURL"]))
+            {
+                return;
+            }
+
             string _exe = await SquirrelUpdate(showInfo);
 
             if (_exe != null)
