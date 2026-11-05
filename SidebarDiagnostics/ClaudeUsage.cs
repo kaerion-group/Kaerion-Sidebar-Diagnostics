@@ -546,6 +546,14 @@ namespace SidebarDiagnostics.Monitoring
             }
         }
 
+        private static void Fill(ClaudeUsage result, JObject usage)
+        {
+            result.SessionPercent = (double?)usage["fiveHour"]?["pct"];
+            result.SessionReset = ClaudeUsageClient.ParseDate(usage["fiveHour"]?["resetsAt"]);
+            result.WeekPercent = (double?)usage["sevenDay"]?["pct"];
+            result.WeekReset = ClaudeUsageClient.ParseDate(usage["sevenDay"]?["resetsAt"]);
+        }
+
         private static ClaudeSwapAccount[] Parse(JObject json)
         {
             JArray _accounts = json["accounts"] as JArray;
@@ -568,14 +576,40 @@ namespace SidebarDiagnostics.Monitoring
 
                 if ((string)a["usageStatus"] != "ok" || _usage == null)
                 {
-                    _result.Status = ClaudeUsageStatus.Unavailable;
+                    // Sin dato nuevo (p. ej. http-429 al consultar), claude-swap conserva el ultimo bueno: se
+                    // muestra atenuado por viejo mientras la semana de ese dato siga vigente.
+                    JObject _good = a["lastGoodUsage"] as JObject;
+                    DateTime? _goodAt = ClaudeUsageClient.ParseDate(a["lastGoodFetchedAt"]);
+
+                    if (_good != null && _goodAt.HasValue)
+                    {
+                        Fill(_result, _good);
+
+                        _result.FetchedAt = _goodAt;
+                        _result.StaleReason = (string)a["usageError"] ?? "sin dato nuevo";
+
+                        DateTime _now = DateTime.UtcNow;
+
+                        // La ventana de 5h ya reiniciada no dice nada del uso actual.
+                        if (_result.SessionReset.HasValue && _result.SessionReset.Value <= _now)
+                        {
+                            _result.SessionPercent = null;
+                            _result.SessionReset = null;
+                        }
+
+                        if (!_result.WeekReset.HasValue || _result.WeekReset.Value <= _now)
+                        {
+                            _result = new ClaudeUsage() { Status = ClaudeUsageStatus.Unavailable, FetchedAt = _result.FetchedAt, Active = _result.Active, SwapNumber = _result.SwapNumber };
+                        }
+                    }
+                    else
+                    {
+                        _result.Status = ClaudeUsageStatus.Unavailable;
+                    }
                 }
                 else
                 {
-                    _result.SessionPercent = (double?)_usage["fiveHour"]?["pct"];
-                    _result.SessionReset = ClaudeUsageClient.ParseDate(_usage["fiveHour"]?["resetsAt"]);
-                    _result.WeekPercent = (double?)_usage["sevenDay"]?["pct"];
-                    _result.WeekReset = ClaudeUsageClient.ParseDate(_usage["sevenDay"]?["resetsAt"]);
+                    Fill(_result, _usage);
                 }
 
                 return new ClaudeSwapAccount()
@@ -616,6 +650,9 @@ namespace SidebarDiagnostics.Monitoring
 
         /// <summary>Momento en que se obtuvo el dato (consulta directa o cache de claude-swap).</summary>
         public DateTime? FetchedAt { get; set; }
+
+        /// <summary>Motivo por el que el dato es el ultimo bueno y no uno nuevo (p. ej. "http-429"); null si es reciente.</summary>
+        public string StaleReason { get; set; }
 
         /// <summary>Cuenta activa en claude-swap.</summary>
         public bool Active { get; set; }
@@ -1645,6 +1682,11 @@ namespace SidebarDiagnostics.Monitoring
             if (LastUsage == null || Status != ClaudeUsageStatus.Ok || _e == null)
             {
                 _advice.SetText("");
+            }
+            else if (LastUsage.StaleReason != null && LastUsage.FetchedAt.HasValue && IsStale)
+            {
+                // Dato viejo (la consulta falla, p. ej. 429): no se estima sobre el, solo se explica.
+                _advice.SetText(string.Format("sin dato nuevo ({0}) · hace {1}", LastUsage.StaleReason.Replace("http-", ""), ClaudeMetric.FormatSpan(DateTime.UtcNow - LastUsage.FetchedAt.Value)), ClaudeMetric.LEVELNORMAL);
             }
             else if (_weekLeft.HasValue)
             {
