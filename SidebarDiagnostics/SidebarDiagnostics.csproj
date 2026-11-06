@@ -197,6 +197,7 @@
     </Compile>
     <Compile Include="ChangeLogModel.cs" />
     <Compile Include="ClaudeEstimate.cs" />
+    <Compile Include="ClaudeProfile.cs" />
     <Compile Include="ClaudeUsage.cs" />
     <Compile Include="Graph.xaml.cs">
       <DependentUpon>Graph.xaml</DependentUpon>

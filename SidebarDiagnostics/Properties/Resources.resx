@@ -1120,6 +1120,14 @@
     <value>Fin</value>
     <comment>Short label for the Claude total row with when the free capacity runs out</comment>
   </data>
+  <data name="ClaudeRenewal" xml:space="preserve">
+    <value>Subscription renewal</value>
+    <comment>Full name for the Claude row with the days left until the monthly renewal</comment>
+  </data>
+  <data name="ClaudeRenewalLabel" xml:space="preserve">
+    <value>Renov.</value>
+    <comment>Short label for the Claude row with the days left until the monthly renewal</comment>
+  </data>
   <data name="SettingsShowMachineName" xml:space="preserve">
     <value>Show PC Name</value>
     <comment>Settings show machine name label</comment>

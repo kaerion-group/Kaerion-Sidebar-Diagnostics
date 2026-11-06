@@ -726,6 +726,35 @@ namespace SidebarDiagnostics.Monitoring
             return _swap.Usage;
         }
 
+        /// <summary>GET de otro endpoint de la API con el token de esa cuenta; null si falla.</summary>
+        public static async Task<JObject> GetJsonAsync(string path, string credentialsPath)
+        {
+            string _token;
+            DateTime? _expiresAt;
+
+            if (ClaudeAccountStore.GetCredentialStatus(credentialsPath, out _token, out _expiresAt) != ClaudeUsageStatus.Ok)
+            {
+                return null;
+            }
+
+            try
+            {
+                using (HttpRequestMessage _request = new HttpRequestMessage(HttpMethod.Get, "https://api.anthropic.com" + path))
+                {
+                    _request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _token);
+
+                    using (HttpResponseMessage _response = await _http.SendAsync(_request).ConfigureAwait(false))
+                    {
+                        return _response.IsSuccessStatusCode ? JObject.Parse(await _response.Content.ReadAsStringAsync().ConfigureAwait(false)) : null;
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
         public static async Task<ClaudeUsage> FetchAsync(string credentialsPath)
         {
             // Se relee en cada consulta: Claude Code renueva el token en ese mismo archivo.
@@ -1210,6 +1239,12 @@ namespace SidebarDiagnostics.Monitoring
                 _metrics.Add(_advice);
             }
 
+            if (metrics.IsEnabled(MetricKey.ClaudeRenewal))
+            {
+                _renewal = new ClaudeMetric(MetricKey.ClaudeRenewal, WEEK);
+                _metrics.Add(_renewal);
+            }
+
             Metrics = _metrics.ToArray();
 
             _instances.Add(new WeakReference<ClaudeMonitor>(this));
@@ -1657,8 +1692,59 @@ namespace SidebarDiagnostics.Monitoring
             _week?.Refresh();
 
             ShowAdvice();
+            ShowRenewal();
 
             IsStale = LastUsage?.FetchedAt != null && DateTime.UtcNow - LastUsage.FetchedAt.Value > STALE;
+        }
+
+        // Dias que faltan para la renovacion mensual de la suscripcion, calculada desde el dia en que se creo.
+        // El perfil se consulta una vez al dia y solo de cuentas cuyo token se puede leer (la activa de
+        // claude-swap y las de carpeta propia); hasta entonces la fila dice "sin dato".
+        private void ShowRenewal()
+        {
+            if (_renewal == null)
+            {
+                return;
+            }
+
+            ClaudeProfile _profile = ClaudeProfileStore.Get(ID);
+
+            if (_profile == null || !_profile.SubscriptionCreatedAt.HasValue)
+            {
+                _renewal.SetText("sin dato");
+                return;
+            }
+
+            if (!string.Equals(_profile.Status, "active", StringComparison.OrdinalIgnoreCase))
+            {
+                _renewal.SetText(string.Format("{0} {1}", (char)0x26A0, string.IsNullOrEmpty(_profile.Status) ? "suscripcion?" : _profile.Status), ClaudeMetric.LEVELWARN);
+                return;
+            }
+
+            DateTime _next = _profile.NextRenewal(DateTime.UtcNow).Value;
+            TimeSpan _left = _next - DateTime.UtcNow;
+
+            _renewal.SetText(
+                string.Format("{0} · {1}", ClaudeMetric.FormatSpan(_left), ClaudeSchedule.ToLocal(_next).ToString("d MMM")),
+                _left.TotalDays <= 3 ? ClaudeMetric.LEVELWARN : ClaudeMetric.LEVELNORMAL
+                );
+        }
+
+        // Cuentas cuyo token se puede leer: la propia carpeta, o la activa de claude-swap con ~/.claude.
+        private void RefreshProfile(ClaudeUsage usage)
+        {
+            if (!_account.IsSwap)
+            {
+                ClaudeProfileStore.RefreshIfNeeded(ID, _account.CredentialsPath, null);
+                return;
+            }
+
+            string _default = ClaudeAccountStore.DefaultCredentialsPath;
+
+            if (usage.Active && string.Equals(ClaudeAccountStore.GetEmail(_default), SwapEmail, StringComparison.OrdinalIgnoreCase))
+            {
+                ClaudeProfileStore.RefreshIfNeeded(ID, _default, SwapEmail);
+            }
         }
 
         // Si la carga (lo que hay que gastar entre lo que se puede) llega a esta fraccion, ya no hay margen.
@@ -1777,6 +1863,8 @@ namespace SidebarDiagnostics.Monitoring
             // Todas las lecturas buenas van al historial, aunque la fila de la semana no se muestre.
             _history.Add(usage);
 
+            RefreshProfile(usage);
+
             _rateCheck = DateTime.MinValue;
             _estimateCheck = DateTime.MinValue;
 
@@ -1827,6 +1915,8 @@ namespace SidebarDiagnostics.Monitoring
         private ClaudeMetric _week { get; set; }
 
         private ClaudeMetric _advice { get; set; }
+
+        private ClaudeMetric _renewal { get; set; }
 
         private ClaudeAccountHistory _history { get; set; }
 

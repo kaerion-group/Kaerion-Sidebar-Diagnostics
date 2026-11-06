@@ -931,6 +931,24 @@ namespace SidebarDiagnostics.Framework {
         }
 
         /// <summary>
+        ///   Looks up a localized string similar to Subscription renewal.
+        /// </summary>
+        public static string ClaudeRenewal {
+            get {
+                return ResourceManager.GetString("ClaudeRenewal", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Renov..
+        /// </summary>
+        public static string ClaudeRenewalLabel {
+            get {
+                return ResourceManager.GetString("ClaudeRenewalLabel", resourceCulture);
+            }
+        }
+
+        /// <summary>
         ///   Looks up a localized string similar to Bandwidth In.
         /// </summary>
         public static string NetworkIn {
