@@ -533,7 +533,7 @@ namespace SidebarDiagnostics.Framework
             }
         }
 
-        private bool _showClock { get; set; } = true;
+        private bool _showClock { get; set; } = false;
 
         [JsonProperty]
         public bool ShowClock
