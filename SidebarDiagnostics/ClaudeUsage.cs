@@ -1709,13 +1709,13 @@ namespace SidebarDiagnostics.Monitoring
 
             ClaudeProfile _profile = ClaudeProfileStore.Get(ID);
 
-            if (_profile == null || !_profile.SubscriptionCreatedAt.HasValue)
+            if (_profile == null || (!_profile.ManualDay.HasValue && !_profile.SubscriptionCreatedAt.HasValue))
             {
                 _renewal.SetText("sin dato");
                 return;
             }
 
-            if (!string.Equals(_profile.Status, "active", StringComparison.OrdinalIgnoreCase))
+            if (!_profile.ManualDay.HasValue && !string.Equals(_profile.Status, "active", StringComparison.OrdinalIgnoreCase))
             {
                 _renewal.SetText(string.Format("{0} {1}", (char)0x26A0, string.IsNullOrEmpty(_profile.Status) ? "suscripcion?" : _profile.Status), ClaudeMetric.LEVELWARN);
                 return;
@@ -1724,10 +1724,59 @@ namespace SidebarDiagnostics.Monitoring
             DateTime _next = _profile.NextRenewal(DateTime.UtcNow).Value;
             TimeSpan _left = _next - DateTime.UtcNow;
 
+            // Un asterisco indica que el dia lo puso el usuario y no sale del perfil.
             _renewal.SetText(
-                string.Format("{0} · {1}", ClaudeMetric.FormatSpan(_left), ClaudeSchedule.ToLocal(_next).ToString("d MMM")),
-                _left.TotalDays <= 3 ? ClaudeMetric.LEVELWARN : ClaudeMetric.LEVELNORMAL
+                string.Format("{0} · {1}{2}", ClaudeMetric.FormatSpan(_left), ClaudeSchedule.ToLocal(_next).ToString("d MMM"), _profile.ManualDay.HasValue ? "*" : ""),
+                _left.TotalDays <= RENEWALALERTDAYS[0] ? ClaudeMetric.LEVELWARN : ClaudeMetric.LEVELNORMAL
                 );
+
+            NotifyRenewal(_profile, _next, _left);
+        }
+
+        // Avisos de Windows antes de la renovacion, con estos dias de antelacion de mayor a menor.
+        private static readonly int[] RENEWALALERTDAYS = new int[] { 5, 3 };
+
+        // Un aviso por etapa y renovacion: si la app se abre ya dentro de los 3 dias solo se muestra el de 3. Lo
+        // mostrado se guarda en el perfil para no repetirlo al reiniciar la aplicacion.
+        private void NotifyRenewal(ClaudeProfile profile, DateTime next, TimeSpan left)
+        {
+            int _stage = RENEWALALERTDAYS.Where(d => left.TotalDays <= d).DefaultIfEmpty(0).Min();
+
+            if (_stage == 0 || App.TrayIcon == null)
+            {
+                return;
+            }
+
+            string _date = ClaudeSchedule.ToLocal(next).ToString("yyyyMMdd");
+
+            if (profile.AlertedFor == _date && profile.AlertedStage > 0 && profile.AlertedStage <= _stage)
+            {
+                return;
+            }
+
+            try
+            {
+                App.TrayIcon.ShowBalloonTip(
+                    BaseName + ": renovacion cercana",
+                    string.Format("Se renueva en {0} ({1}).", ClaudeMetric.FormatSpan(left), ClaudeSchedule.ToLocal(next).ToString("d MMM")),
+                    Hardcodet.Wpf.TaskbarNotification.BalloonIcon.Info
+                    );
+
+                ClaudeProfileStore.MarkAlerted(ID, _date, _stage);
+            }
+            catch (Exception) { }
+        }
+
+        /// <summary>Dia del mes del cobro puesto a mano; null si se usa el calculado del perfil.</summary>
+        public int? RenewalDay
+        {
+            get { return ClaudeProfileStore.Get(ID)?.ManualDay; }
+        }
+
+        /// <summary>Fija el dia del cobro (1-31); 0 vuelve al dato del perfil.</summary>
+        public void SetRenewalDay(int day)
+        {
+            ClaudeProfileStore.SetManualDay(ID, day > 0 ? day : (int?)null);
         }
 
         // Cuentas cuyo token se puede leer: la propia carpeta, o la activa de claude-swap con ~/.claude.

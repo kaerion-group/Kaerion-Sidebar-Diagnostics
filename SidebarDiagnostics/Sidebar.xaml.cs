@@ -247,6 +247,23 @@ namespace SidebarDiagnostics
             }
         }
 
+        private void ClaudeRenewal_Click(object sender, RoutedEventArgs e)
+        {
+            Monitoring.ClaudeMonitor _monitor = (sender as FrameworkElement)?.DataContext as Monitoring.ClaudeMonitor;
+
+            if (_monitor == null)
+            {
+                return;
+            }
+
+            int? _day = Monitoring.ClaudeRenewalPrompt.Show(this, _monitor.BaseName, _monitor.RenewalDay);
+
+            if (_day.HasValue)
+            {
+                _monitor.SetRenewalDay(_day.Value);
+            }
+        }
+
         private void ClaudeAliasClear_Click(object sender, RoutedEventArgs e)
         {
             ((sender as FrameworkElement)?.DataContext as Monitoring.ClaudeMonitor)?.ShowEmail();

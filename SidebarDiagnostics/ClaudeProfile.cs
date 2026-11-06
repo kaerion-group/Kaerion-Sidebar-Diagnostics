@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Controls;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
@@ -33,11 +35,43 @@ namespace SidebarDiagnostics.Monitoring
         public DateTime FetchedAt { get; set; }
 
         /// <summary>
+        /// Dia del mes del cobro, puesto a mano. Manda sobre el calculado desde la creacion de la suscripcion,
+        /// que el perfil no garantiza que sea la fecha de cobro.
+        /// </summary>
+        [JsonProperty]
+        public int? ManualDay { get; set; }
+
+        /// <summary>Fecha (aaaammdd) de la renovacion del ultimo aviso mostrado.</summary>
+        [JsonProperty]
+        public string AlertedFor { get; set; }
+
+        /// <summary>Dias de antelacion (5 o 3) del ultimo aviso mostrado para esa renovacion.</summary>
+        [JsonProperty]
+        public int AlertedStage { get; set; }
+
+        /// <summary>
         /// Proxima renovacion mensual estimada: el mismo dia y hora de la creacion de la suscripcion, cada mes.
         /// Falla si se cambio la fecha de facturacion; null si no hay fecha.
         /// </summary>
         public DateTime? NextRenewal(DateTime nowUtc)
         {
+            if (ManualDay.HasValue)
+            {
+                // Inicio del dia de cobro, hora local; en meses cortos se usa el ultimo dia.
+                DateTime _local = ClaudeSchedule.ToLocal(nowUtc);
+
+                for (int i = 0; i < 3; i++)
+                {
+                    DateTime _month = new DateTime(_local.Year, _local.Month, 1).AddMonths(i);
+                    DateTime _candidate = new DateTime(_month.Year, _month.Month, Math.Min(ManualDay.Value, DateTime.DaysInMonth(_month.Year, _month.Month)));
+
+                    if (_candidate > _local)
+                    {
+                        return DateTime.SpecifyKind(_candidate, DateTimeKind.Local).ToUniversalTime();
+                    }
+                }
+            }
+
             if (!SubscriptionCreatedAt.HasValue)
             {
                 return null;
@@ -163,22 +197,79 @@ namespace SidebarDiagnostics.Monitoring
             });
         }
 
+        /// <summary>Fija a mano el dia del mes del cobro de una cuenta; null para volver al dato del perfil.</summary>
+        public static void SetManualDay(string accountId, int? day)
+        {
+            lock (_lock)
+            {
+                Load();
+
+                ClaudeProfile _profile;
+
+                if (!_profiles.TryGetValue(accountId, out _profile))
+                {
+                    _profile = new ClaudeProfile() { FetchedAt = DateTime.MinValue };
+                }
+
+                _profile.ManualDay = day;
+                _profile.AlertedFor = null;
+                _profile.AlertedStage = 0;
+
+                Save(accountId, _profile);
+            }
+        }
+
+        /// <summary>Anota el aviso mostrado para que no se repita al reiniciar la aplicacion.</summary>
+        public static void MarkAlerted(string accountId, string renewalDate, int stage)
+        {
+            lock (_lock)
+            {
+                Load();
+
+                ClaudeProfile _profile;
+
+                if (_profiles.TryGetValue(accountId, out _profile))
+                {
+                    _profile.AlertedFor = renewalDate;
+                    _profile.AlertedStage = stage;
+
+                    Save(accountId, _profile);
+                }
+            }
+        }
+
         private static void Store(string accountId, ClaudeProfile profile)
         {
             lock (_lock)
             {
                 Load();
 
-                _profiles[accountId] = profile;
+                ClaudeProfile _old;
 
-                try
+                // Lo puesto a mano y los avisos ya mostrados sobreviven a la lectura del perfil.
+                if (_profiles.TryGetValue(accountId, out _old))
                 {
-                    Directory.CreateDirectory(ClaudeData.Dir);
-
-                    File.WriteAllText(FilePath, JsonConvert.SerializeObject(_profiles, Formatting.Indented));
+                    profile.ManualDay = _old.ManualDay;
+                    profile.AlertedFor = _old.AlertedFor;
+                    profile.AlertedStage = _old.AlertedStage;
                 }
-                catch (Exception) { }
+
+                Save(accountId, profile);
             }
+        }
+
+        // Se llama con el candado tomado.
+        private static void Save(string accountId, ClaudeProfile profile)
+        {
+            _profiles[accountId] = profile;
+
+            try
+            {
+                Directory.CreateDirectory(ClaudeData.Dir);
+
+                File.WriteAllText(FilePath, JsonConvert.SerializeObject(_profiles, Formatting.Indented));
+            }
+            catch (Exception) { }
         }
 
         // Se llama con el candado tomado.
@@ -204,6 +295,103 @@ namespace SidebarDiagnostics.Monitoring
                 }
             }
             catch (Exception) { }
+        }
+    }
+
+    /// <summary>Ventana minima para escribir el dia de cobro de una cuenta.</summary>
+    public static class ClaudeRenewalPrompt
+    {
+        /// <summary>
+        /// Devuelve el dia del mes (1-31), 0 para quitar el dato puesto a mano, o null si se cancela. Acepta un
+        /// numero o una fecha (dd/mm/aaaa o aaaa-mm-dd), de la que se toma el dia.
+        /// </summary>
+        public static int? Show(Window owner, string accountName, int? current)
+        {
+            TextBox _input = new TextBox() { Text = current.HasValue ? current.Value.ToString() : "", MinWidth = 280, Margin = new Thickness(0, 6, 0, 4), Padding = new Thickness(3) };
+            TextBlock _error = new TextBlock() { Foreground = System.Windows.Media.Brushes.Firebrick, Margin = new Thickness(0, 0, 0, 8), Visibility = Visibility.Collapsed, Text = "Escribe un dia (1 a 31) o una fecha." };
+
+            Button _ok = new Button() { Content = "Aceptar", IsDefault = true, MinWidth = 80, Margin = new Thickness(0, 0, 8, 0), Padding = new Thickness(8, 3, 8, 3) };
+            Button _cancel = new Button() { Content = "Cancelar", IsCancel = true, MinWidth = 80, Padding = new Thickness(8, 3, 8, 3) };
+
+            StackPanel _buttons = new StackPanel() { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+            _buttons.Children.Add(_ok);
+            _buttons.Children.Add(_cancel);
+
+            StackPanel _panel = new StackPanel() { Margin = new Thickness(14) };
+            _panel.Children.Add(new TextBlock() { Text = string.Format("Dia del mes en que se renueva {0}\n(un numero o una fecha; vacio para usar el dato calculado)", accountName) });
+            _panel.Children.Add(_input);
+            _panel.Children.Add(_error);
+            _panel.Children.Add(_buttons);
+
+            Window _window = new Window()
+            {
+                Title = "Renovacion",
+                Content = _panel,
+                SizeToContent = SizeToContent.WidthAndHeight,
+                ResizeMode = ResizeMode.NoResize,
+                WindowStartupLocation = WindowStartupLocation.CenterScreen,
+                ShowInTaskbar = false,
+                Topmost = true
+            };
+
+            if (owner != null && owner.IsVisible)
+            {
+                _window.Owner = owner;
+            }
+
+            int _day = 0;
+
+            _ok.Click += (s, e) =>
+            {
+                if (TryParse(_input.Text, out _day))
+                {
+                    _window.DialogResult = true;
+                }
+                else
+                {
+                    _error.Visibility = Visibility.Visible;
+                }
+            };
+
+            _window.Loaded += (s, e) =>
+            {
+                _input.Focus();
+                _input.SelectAll();
+            };
+
+            return _window.ShowDialog() == true ? _day : (int?)null;
+        }
+
+        private static bool TryParse(string text, out int day)
+        {
+            day = 0;
+
+            text = (text ?? "").Trim();
+
+            if (text.Length == 0)
+            {
+                return true;
+            }
+
+            int _number;
+
+            if (int.TryParse(text, out _number))
+            {
+                day = _number;
+
+                return _number >= 1 && _number <= 31;
+            }
+
+            DateTime _date;
+
+            if (DateTime.TryParse(text, System.Globalization.CultureInfo.CurrentCulture, System.Globalization.DateTimeStyles.None, out _date) || DateTime.TryParse(text, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out _date))
+            {
+                day = _date.Day;
+
+                return true;
+            }
+
+            return false;
         }
     }
 }
