@@ -171,7 +171,7 @@
                                                 </StackPanel>
                                             </DataTemplate>
 
-                                            <ContextMenu x:Key="ClaudeAccountMenu" x:Shared="False">
+                                            <ContextMenu x:Key="ClaudeAccountMenu" x:Shared="False" DataContext="{Binding Path=PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
                                                 <MenuItem Header="Pseudonimo..." Click="ClaudeAlias_Click" />
                                                 <MenuItem Header="Mostrar correo" Click="ClaudeAliasClear_Click" />
                                                 <MenuItem Header="Dia de renovacion..." Click="ClaudeRenewal_Click" />
